@@ -34,9 +34,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Create placeholder .env (compose requires the file to exist)
-        run: cp .env.example .env
-
       - name: Validate compose config
         run: docker compose config
 
