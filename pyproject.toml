@@ -1,0 +1,67 @@
+[project]
+name = "researchops-agent"
+version = "0.1.0"
+description = "ResearchOps Agent: an LLM agent for deep-learning experiment orchestration (RAG + Agent + MCP + observability)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "ResearchOps Agent contributors" }]
+keywords = ["llm", "agent", "rag", "mcp", "langgraph", "deep-learning"]
+classifiers = [
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
+
+# Core runtime deps (kept deliberately light in Phase 0; ML/Agent deps land in later phases)
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+    "typing-extensions>=4.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.9",
+    "mypy>=1.13",
+]
+
+[project.scripts]
+researchops = "researchops.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/researchops"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["researchops"]
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["researchops.*"]
+disallow_untyped_defs = true

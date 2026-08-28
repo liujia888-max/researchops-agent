@@ -1,0 +1,1 @@
+# Marker file to declare PEP 561 inline typing (so `mypy strict` downstream consumers see our types).
