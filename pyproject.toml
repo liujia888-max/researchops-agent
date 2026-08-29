@@ -34,6 +34,13 @@ dev = [
     "ruff>=0.9",
     "mypy>=1.13",
 ]
+# Eval-only: RAGAS faithfulness/answer_relevancy. Installed on the GPU host,
+# not pulled into the core runtime (keeps the shipped package light).
+eval = [
+    "ragas>=0.2.0",
+    "langchain-openai>=0.2.0",
+    "langchain-core>=0.3.0",
+]
 
 [project.scripts]
 researchops = "researchops.cli:main"
