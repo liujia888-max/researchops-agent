@@ -49,7 +49,15 @@ python -m pytest tests/test_chunking.py tests/test_citation.py tests/test_metric
 - `src/researchops/eval/metrics.py` —— Recall@k / Hit@k / MRR / rerank delta（纯函数）
 - `golden_set/restormer.json` —— 14 条手标问答
 
+## 带引用生成 demo（真实 LLM，DeepSeek）
+
+`python e2e_citation.py "query"` 走完整链路：混合检索 → 带 `[n]` 引用生成 → grounding 校验 → 页码追溯。
+
+- **概念类问题**（例：`How does the MDTA module achieve linear complexity?`）→ 正确答案，4 条引用全部 grounded，核心定位到 `3.1. Multi-Dconv Head Transposed Attention`（p4）「apply SA across channels rather than spatial」。
+- **数字表格类问题**（例：`CBSD68 σ=25 的 PSNR`）→ 模型把 PSNR 说成 `33.04 dB`，正确值是 `34.67 dB`。根因：PyMuPDF 把表格抽成无结构数字流，列头/行标签丢失，LLM 无法映射「数字 → 数据集/σ」；词法级 grounding 只验「引用块里有没有数字」，验不了「数字对不对」。
+
+这正好量化了下一步的必要性：**MinerU 结构化表格解析**（保列头→行标签映射）+ **RAGAS faithfulness**（NLI 判真）。
+
 ## 待办（依赖外部资源）
 
-- 带引用生成的**真实 LLM 端到端 demo**：需配置 `deepseek_api_key`（当前无 key）。
-- RAGAS faithfulness / answer_relevancy：需 LLM judge + `ragas` 依赖。
+- RAGAS faithfulness / answer_relevancy：需 LLM judge + `ragas` 依赖（解决上述数字幻觉问题）。
