@@ -1,0 +1,106 @@
+{
+  "paper": "restormer",
+  "title": "Restormer: Efficient Transformer for High-Resolution Image Restoration",
+  "arxiv": "2111.09881",
+  "description": "Hand-labeled golden set for retrieval evaluation. Each item's gold_pages lists the PDF pages (1-based, matching the chunk page field) whose chunks contain the answer. answers are reference facts for a later faithfulness/LLM-judge eval, not the retrieval metric.",
+  "items": [
+    {
+      "id": "r001",
+      "query": "What is Restormer?",
+      "gold_pages": [1],
+      "answer": "Restormer is the 'Restoration Transformer', an efficient transformer model for high-resolution image restoration.",
+      "note": "Defined in the abstract."
+    },
+    {
+      "id": "r002",
+      "query": "What is the main limitation of existing transformer models that Restormer addresses?",
+      "gold_pages": [1, 2],
+      "answer": "Quadratic self-attention complexity and the inability to model long-range pixel interactions over high-resolution images.",
+      "note": "Abstract motivation + related work."
+    },
+    {
+      "id": "r003",
+      "query": "How does the multi-dconv head transposed attention (MDTA) achieve linear complexity?",
+      "gold_pages": [3],
+      "answer": "It applies attention across feature channels (channel-wise self-attention) instead of the spatial dimension, avoiding quadratic cost in spatial size.",
+      "note": "Section 3.2 MDTA."
+    },
+    {
+      "id": "r004",
+      "query": "What does GDFN stand for and what is its role?",
+      "gold_pages": [3],
+      "answer": "Gated-Dconv Feed-forward Network; it gates the information flow through a feed-forward network to control the transformation.",
+      "note": "Section 3.3."
+    },
+    {
+      "id": "r005",
+      "query": "What PSNR does Restormer achieve on CBSD68 for Gaussian color image denoising?",
+      "gold_pages": [7, 8],
+      "answer": "Around 34.67 dB at sigma=25 (state of the art across sigma=15/25/50).",
+      "note": "Denoising table in Experiments."
+    },
+    {
+      "id": "r006",
+      "query": "How does Restormer compare to SwinIR on Gaussian grayscale denoising?",
+      "gold_pages": [7, 8],
+      "answer": "Restormer outperforms SwinIR by a notable PSNR margin while being more efficient.",
+      "note": "Denoising comparison table."
+    },
+    {
+      "id": "r007",
+      "query": "What is the progressive training strategy used by Restormer?",
+      "gold_pages": [4, 5],
+      "answer": "A three-stage progressive training schedule that starts with smaller image patches and crops and gradually increases patch size and reduces batch size.",
+      "note": "Training details section."
+    },
+    {
+      "id": "r008",
+      "query": "What datasets are used to train Restormer?",
+      "gold_pages": [4, 5],
+      "answer": "ImageNet, DIV2K, Flickr2K, and BSD datasets, depending on the task.",
+      "note": "Training details section."
+    },
+    {
+      "id": "r009",
+      "query": "Does Restormer process full images or image patches?",
+      "gold_pages": [1, 3],
+      "answer": "It processes the full high-resolution image (not cropped patches), thanks to the linear-complexity attention.",
+      "note": "Abstract and method overview."
+    },
+    {
+      "id": "r010",
+      "query": "What are the two core modules of the Restormer transformer block?",
+      "gold_pages": [3],
+      "answer": "The multi-dconv head transposed attention (MDTA) and the gated-dconv feed-forward network (GDFN).",
+      "note": "Method architecture."
+    },
+    {
+      "id": "r011",
+      "query": "What is the channel-wise transposed attention design in MDTA?",
+      "gold_pages": [3],
+      "answer": "Query, key, and value are depth-wise convolution projections that aggregate spatial context, then attention is computed across channels.",
+      "note": "Section 3.2."
+    },
+    {
+      "id": "r012",
+      "query": "What do the ablation studies show about the number of transformer blocks?",
+      "gold_pages": [8],
+      "answer": "A deep-narrow design performs more accurately than a wide-shallow counterpart, though the wider model runs faster due to parallelization.",
+      "note": "Section 4.5 Ablation Studies."
+    },
+    {
+      "id": "r013",
+      "query": "What tasks does Restormer handle beyond denoising?",
+      "gold_pages": [1, 8],
+      "answer": "Image deraining, deblurring, and defocus deblurring, in addition to denoising.",
+      "note": "Abstract + conclusion."
+    },
+    {
+      "id": "r014",
+      "query": "Does Restormer use self-attention over spatial pixels?",
+      "gold_pages": [3],
+      "answer": "No; it uses channel-wise attention (MDTA) instead of spatial self-attention, which is what keeps it linear.",
+      "note": "Contrast to prior transformers in Section 3."
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+# Remote GPU inference deps (installed on autodl-new5, RTX 5090)
+# bge-m3 embedding (dense + sparse) + bge-reranker-v2-m3 via FlagEmbedding
+FlagEmbedding>=1.3
+qdrant-client>=1.11
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9
+# PyMuPDF for remote fallback parsing (fitz)
+PyMuPDF>=1.24

@@ -24,6 +24,9 @@ qdrant_storage/
 *.db
 *.sqlite3
 
+# 远程同步产物（本地打包 src 用，不入库）
+*.tgz
+
 # 日志
 logs/
 *.log

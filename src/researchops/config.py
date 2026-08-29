@@ -33,6 +33,16 @@ class Settings(BaseSettings):
     vllm_model: str = "Qwen/Qwen2.5-7B-Instruct"
     vllm_api_key: str = "not-needed"
 
+    # Phase 1 — RAG infrastructure
+    # Remote inference service (bge-m3 + reranker) on the GPU host.
+    inference_base_url: str = "http://127.0.0.1:8001"
+    # Qdrant vector store.
+    qdrant_url: str = "http://127.0.0.1:6333"
+    qdrant_collection: str = "papers"
+    # Hybrid retrieval: number of candidates per branch before RRF + rerank.
+    retrieval_top_k: int = 20
+    retrieval_rerank_top_k: int = 5
+
 
 @lru_cache
 def get_settings() -> Settings:
