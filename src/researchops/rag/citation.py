@@ -21,7 +21,7 @@ unit-testable on a machine with no GPU and no network.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from researchops.llm.providers import BaseLLM, ChatMessage
 from researchops.rag.models import Chunk
@@ -58,6 +58,7 @@ class CitedAnswer:
     chunks: list[Chunk]  # context passages, indexed 1..N by the prompt
     citations: list[Citation]
     grounded: list[bool]  # aligned with `citations`
+    dangling_indices: list[int] = field(default_factory=list)  # out-of-range [n]
 
 
 def build_prompt(query: str, chunks: list[Chunk]) -> list[ChatMessage]:
@@ -180,9 +181,28 @@ async def generate_cited_answer(
     """Run the full cited-answer pipeline: prompt -> generate -> parse -> validate."""
     messages = build_prompt(query, chunks)
     resp = await llm.chat(messages, temperature=0.0, max_tokens=max_tokens)
+    answer = resp.content
+
+    # `validate_grounding` returns one verdict per citation index found, so it is
+    # aligned with `extract_citation_indices`. Filter both to in-range citations
+    # (so `citations` and `grounded` stay aligned) and surface out-of-range ones
+    # as dangling (hallucinated) citations.
+    indices = extract_citation_indices(answer)
+    verdicts = validate_grounding(answer, chunks)
+    citations: list[Citation] = []
+    grounded: list[bool] = []
+    dangling: list[int] = []
+    for i, ok in zip(indices, verdicts, strict=True):
+        if 1 <= i <= len(chunks):
+            citations.append(Citation(index=i, chunk=chunks[i - 1]))
+            grounded.append(ok)
+        else:
+            dangling.append(i)
+
     return CitedAnswer(
-        answer=resp.content,
+        answer=answer,
         chunks=chunks,
-        citations=resolve_citations(resp.content, chunks),
-        grounded=validate_grounding(resp.content, chunks),
+        citations=citations,
+        grounded=grounded,
+        dangling_indices=dangling,
     )

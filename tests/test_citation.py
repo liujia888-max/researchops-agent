@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from researchops.llm.providers import BaseLLM, ChatResponse
 from researchops.rag.citation import (
     build_prompt,
@@ -73,7 +75,18 @@ def test_validate_grounding_no_lexical_overlap_is_false() -> None:
 def test_generate_cited_answer_end_to_end() -> None:
     chunks = [_chunk("Restormer is a restoration transformer.")]
     llm = _FakeLLM("Restormer is a restoration transformer [1].")
-    result = __import__("asyncio").run(generate_cited_answer("What is Restormer?", chunks, llm))
+    result = asyncio.run(generate_cited_answer("What is Restormer?", chunks, llm))
     assert result.answer == "Restormer is a restoration transformer [1]."
     assert [c.index for c in result.citations] == [1]
     assert result.grounded == [True]
+
+
+def test_generate_cited_answer_flags_out_of_range_citation() -> None:
+    # [9] does not exist with only one chunk: it must not desync citations/grounded,
+    # and it is surfaced as a dangling (hallucinated) citation.
+    chunks = [_chunk("Restormer is a restoration transformer.")]
+    llm = _FakeLLM("Restormer is a restoration transformer [1] and more [9].")
+    result = asyncio.run(generate_cited_answer("What is Restormer?", chunks, llm))
+    assert [c.index for c in result.citations] == [1]
+    assert result.grounded == [True]
+    assert result.dangling_indices == [9]
