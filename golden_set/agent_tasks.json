@@ -1,0 +1,20 @@
+[
+  {
+    "id": "restormer-cbsd68-psnr",
+    "task": "Restormer 在 CBSD68 彩色去噪 σ=25 上的 PSNR 是多少？请检索论文并给出带引用的答案。",
+    "expected_tools": ["rag_search"],
+    "expected_facts": ["31.79"]
+  },
+  {
+    "id": "gpu-inventory",
+    "task": "远程 GPU 主机当前有哪些 GPU？列出显存和利用率。",
+    "expected_tools": ["gpu_info"],
+    "expected_facts": []
+  },
+  {
+    "id": "list-workdir",
+    "task": "远程工作目录 /root/autodl-tmp 下有哪些顶层目录或文件？",
+    "expected_tools": ["list_experiments"],
+    "expected_facts": ["pythonProject4"]
+  }
+]
