@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # Per-command SSH timeout (seconds).
     labops_command_timeout: float = 30.0
 
+    # Phase 2 — persistence: experiment/job/metric records (SQLAlchemy 2.0).
+    # SQLite by default (zero infra, git-ignored). Swap to a Postgres DSN
+    # (e.g. postgresql+asyncpg://user:pass@host/db) for production — no code change.
+    db_url: str = "sqlite+aiosqlite:///.researchops/experiments.db"
+
 
 @lru_cache
 def get_settings() -> Settings:

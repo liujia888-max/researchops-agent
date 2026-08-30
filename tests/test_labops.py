@@ -75,6 +75,18 @@ def test_parse_screen_sessions_no_sockets() -> None:
     assert parse_screen_sessions("No Sockets found in /root/.screen.\n") == set()
 
 
+def test_parse_screen_sessions_autodl_timestamped_format() -> None:
+    # Newer screen/AutoDL hosts insert a "(MM/DD/YY HH:MM:SS)" creation field before
+    # the state; the parser must still recognise the session as live.
+    out = (
+        "There is a screen on:\n"
+        "\t17008.repro_model_v3_rgb\t(08/30/26 21:44:41)\t(Detached)\n"
+        "\t9999.dead_job\t(08/30/26 21:00:00)\t(Dead ???)\n"
+        "1 Socket in /run/screen/S-root.\n"
+    )
+    assert parse_screen_sessions(out) == {"repro_model_v3_rgb"}
+
+
 def test_parse_find_dir_and_file() -> None:
     out = "d\tpythonProject4\t1720000000.0\nf\tnotes.txt\t1720000100.5\n"
     exps = parse_find(out, "/root/autodl-tmp")

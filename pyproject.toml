@@ -30,6 +30,9 @@ dependencies = [
     "asyncssh>=2.14",
     # Agent runtime: LangGraph state machine (Planner -> Executor -> Tools -> Reporter).
     "langgraph>=1.0",
+    # Persistence: experiment/job/metric records (SQLAlchemy 2.0 async).
+    "sqlalchemy>=2.0",
+    "aiosqlite>=0.19",
 ]
 
 [project.optional-dependencies]

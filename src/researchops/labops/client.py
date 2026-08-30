@@ -74,13 +74,18 @@ def parse_nvidia_smi(csv_text: str) -> list[Gpu]:
     return gpus
 
 
-_SESSION_RE = re.compile(r"^\s*(\d+)\.(\S+)\s+\((Detached|Attached)\)")
+# A live session line may be ``\t12345.job_name\t(Detached)`` (older screen) or,
+# on newer screen/AutoDL hosts, ``\t12345.job_name\t(MM/DD/YY HH:MM:SS)\t(Detached)``.
+# ``.*`` swallows the optional creation-time field; ``(Detached|Attached)`` is the
+# state, which must be the last token so ``(Dead ??)`` is still excluded.
+_SESSION_RE = re.compile(r"^\s*(\d+)\.(\S+)\s+.*\((Detached|Attached)\)\s*$")
 
 
 def parse_screen_sessions(screen_ls: str) -> set[str]:
     """Return the set of *live* session names from ``screen -ls`` output.
 
-    A live session line looks like ``\t12345.job_name\t(Detached)``. ``(Dead ??)``
+    A live session line looks like ``\t12345.job_name\t(Detached)`` (older hosts) or
+    ``\t12345.job_name\t(08/30/26 21:44:41)\t(Detached)`` (newer hosts). ``(Dead ??)``
     sessions are excluded — they have no process behind them and must not read as
     "running".
     """
