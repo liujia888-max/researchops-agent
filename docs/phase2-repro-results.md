@@ -69,3 +69,54 @@ python scripts/preflight.py     # 仅做只读体检（GPU 余量 / 训练进程
 - 修复了一个真实环境问题：AutoDL 较新 `screen -ls` 输出带 `(MM/DD/YY HH:MM:SS)`
   时间戳字段，旧解析正则无法识别为 live 会话，导致 `job_status` 误判「已结束」而提前拉日志。
   已改为兼容新旧两种格式（见 `src/researchops/labops/client.py` 的 `parse_screen_sessions`）。
+
+## Agent 自主执行（一句话任务 → 自主完成）
+
+上面的确定性链路（`scripts/run_repro.py`）验证的是「真提交 + 轮询 + 落库」这条
+*无 LLM* 的可靠路径；本节验证的是**把这条链路接入 LangGraph Executor 后，agent 能否
+自主走完整个任务**——只给一句话，agent 自己规划、调用 `run_experiment`、检索、出报告。
+
+### 任务（一句话）
+
+> 复现并对比两个模型在 CBSD68（彩色，σ=15/25/50）的 PSNR/SSIM，用 run_experiment
+> 分别跑已确认的两条命令，拿到指标后对比 σ=25 的 PSNR 并写报告。
+
+### Agent 自主规划
+
+1. `run_experiment` model_v3_rgb（`cd pythonProject4 && python3 test_rgb.py`）
+2. `run_experiment` Restormer（`cd pythonProject4/Restormer/Denoising && … test_gaussian_color_denoising.py … && … evaluate_restormer_cbsd68_psnr_ssim.py …`）
+3. `rag_search` 查 CBSD68 彩色去噪 σ=25 参考指标
+4. 对比 σ=25 的 PSNR
+5. 出报告
+
+### 执行与落库
+
+| 工具调用 | 耗时 | 状态 | 落库（experiment / job_id） |
+|---|---|---|---|
+| `run_experiment` model_v3_rgb | 125.7s | completed | `model_v3_rgb_cbsd68` / `model_v3_rgb` |
+| `run_experiment` Restormer | 43.4s | completed | `restormer_blind_cbsd68` / `restormer_blind` |
+
+每次 `run_experiment` 内部走完 submit → 轮询 → 解析 → 落库，返回 6 条 Metric
+（PSNR/SSIM × σ=15/25/50）。两条新实验追加后，全库共 **4 Experiment / 4 JobRun / 24 Metric**。
+
+### 结果与报告
+
+- **σ=25 关键对比**：Restormer **31.7752 dB** vs model_v3_rgb **29.9608 dB**，领先 **+1.81 dB**。
+- 与确定性链路结果**逐位一致**（Restormer σ15/25/50 = 34.386 / 31.7752 / 28.5946）。
+- Agent 用 `rag_search` 命中论文 Table 5（σ=25 = 31.79 dB），在报告中做了**文献一致性校验**，
+  误差 < 0.02 dB，并带 `[1][2]` 引用。
+- 一个自主性细节：agent 自行命名了 experiment/job（`model_v3_rgb_cbsd68` /
+  `restormer_blind_cbsd68`），而非照抄任务提示；且 job_id 与之前 `repro_*` 无碰撞，
+  `submit_job` 的幂等逻辑正常。
+
+### 复现方式
+
+```powershell
+cd D:\Users\刘嘉\ResearchOps-Agent
+$env:RESEARCHOPS_DEMO_AUTO_APPROVE = '1'   # demo 模式：run_experiment 默认拒绝，需显式放行
+python scripts/agent_demo.py               # 约 5–8 分钟
+```
+
+`run_experiment` 是破坏性工具（会在远程 GPU 执行命令），默认拒绝；`agent_demo.py` 仅在
+显式设置上述环境变量时才启用 auto-approve。日常可改用
+`researchops agent "…" --interactive-approval` 在每次提交前手动确认。
