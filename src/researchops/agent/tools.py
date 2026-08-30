@@ -72,6 +72,26 @@ def _dump(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
+# A destructive action (submit_job / cancel_job) is gated by an approver that decides,
+# from (tool_name, arguments), whether to allow it. ``None`` means deny — the fail-safe
+# default — so an unguarded agent can only *propose* a dangerous call, never execute it.
+Approver = Callable[[str, dict[str, Any]], bool]
+
+
+def _require_approval(
+    tool_name: str, approver: Approver | None, arguments: dict[str, Any]
+) -> str | None:
+    """Return a rejection message if the action is not approved, else ``None``."""
+    if approver is None or not approver(tool_name, arguments):
+        return (
+            f"REJECTED: {tool_name} is a destructive action and needs human approval, "
+            f"which was not granted, so it was NOT executed. arguments={arguments}. "
+            "Use read-only tools (rag_search, list_experiments, gpu_info, job_status, "
+            "tail_log, fetch_metrics) to answer instead."
+        )
+    return None
+
+
 def make_rag_search_tool(retriever: Retriever) -> Tool:
     """Retrieve cited chunks from the paper library."""
 
@@ -103,8 +123,12 @@ def make_rag_search_tool(retriever: Retriever) -> Tool:
     )
 
 
-def make_labops_tools(client: LabClient) -> list[Tool]:
-    """The seven remote-lab tools, each a thin text-serializing wrapper over LabClient."""
+def make_labops_tools(client: LabClient, *, approver: Approver | None = None) -> list[Tool]:
+    """The seven remote-lab tools, each a thin text-serializing wrapper over LabClient.
+
+    ``submit_job`` and ``cancel_job`` are destructive, so they sit behind an ``approver``
+    gate. With no approver (the default) they are deny-by-default.
+    """
 
     async def gpu_info() -> str:
         return _dump([g.model_dump() for g in await client.gpu_info()])
@@ -113,6 +137,11 @@ def make_labops_tools(client: LabClient) -> list[Tool]:
         return _dump([e.model_dump() for e in await client.list_experiments()])
 
     async def submit_job(job_id: str, command: str) -> str:
+        rejection = _require_approval(
+            "submit_job", approver, {"job_id": job_id, "command": command}
+        )
+        if rejection is not None:
+            return rejection
         return _dump((await client.submit_job(job_id, command)).model_dump())
 
     async def job_status(job_id: str) -> str:
@@ -122,6 +151,9 @@ def make_labops_tools(client: LabClient) -> list[Tool]:
         return await client.tail_log(job_id, lines)
 
     async def cancel_job(job_id: str) -> str:
+        rejection = _require_approval("cancel_job", approver, {"job_id": job_id})
+        if rejection is not None:
+            return rejection
         return _dump((await client.cancel_job(job_id)).model_dump())
 
     async def fetch_metrics(job_id: str) -> str:
@@ -144,8 +176,8 @@ def make_labops_tools(client: LabClient) -> list[Tool]:
             name="submit_job",
             description=(
                 "Launch a command on the remote GPU host as a detached screen session. "
-                "job_id must match [A-Za-z0-9_-]{1,64}. Destructive — only call when "
-                "the task asks to run a job."
+                "job_id must match [A-Za-z0-9_-]{1,64}. Destructive and requires human "
+                "approval — only call when the task explicitly asks to run a job."
             ),
             parameters={
                 "type": "object",
@@ -182,7 +214,7 @@ def make_labops_tools(client: LabClient) -> list[Tool]:
         ),
         Tool(
             name="cancel_job",
-            description="Terminate a job's screen session (idempotent).",
+            description="Terminate a job's screen session (idempotent). Destructive; requires human approval.",
             parameters={
                 "type": "object",
                 "properties": {"job_id": {"type": "string"}},
@@ -203,10 +235,15 @@ def make_labops_tools(client: LabClient) -> list[Tool]:
     ]
 
 
-def build_default_tools(retriever: Retriever, lab_client: LabClient) -> ToolRegistry:
+def build_default_tools(
+    retriever: Retriever,
+    lab_client: LabClient,
+    *,
+    approver: Approver | None = None,
+) -> ToolRegistry:
     """Wire the full toolset: paper retrieval + remote-lab orchestration."""
     registry = ToolRegistry()
     registry.register(make_rag_search_tool(retriever))
-    for tool in make_labops_tools(lab_client):
+    for tool in make_labops_tools(lab_client, approver=approver):
         registry.register(tool)
     return registry

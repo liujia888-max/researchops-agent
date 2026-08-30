@@ -112,8 +112,12 @@ def build_agent(
 
         if resp.tool_calls:
             call = resp.tool_calls[0]
+            # Echo back exactly the one tool_call we are about to execute, so the next
+            # turn pairs one assistant tool_call with one tool message. OpenAI-compatible
+            # APIs reject an assistant tool_calls message that has more ids than following
+            # tool replies; we run one tool per step and re-decide the rest next iteration.
             assistant = AgentMessage(
-                role="assistant", content=resp.content, tool_calls=resp.raw_tool_calls
+                role="assistant", content=resp.content, tool_calls=resp.raw_tool_calls[:1]
             )
             return {
                 "messages": state.messages + [assistant],

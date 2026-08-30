@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from typing import Any
 
 from researchops.llm import build_llm
 from researchops.llm.providers import ChatMessage
@@ -29,6 +30,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("agent", help="run the agent end-to-end on a research task")
     p.add_argument("task", help="the research task, e.g. 'reproduce Restormer on CBSD68'")
     p.add_argument("--max-iterations", type=int, default=10)
+    p.add_argument(
+        "--interactive-approval",
+        action="store_true",
+        help="prompt for human approval before destructive labops actions (submit_job/cancel_job)",
+    )
     return parser
 
 
@@ -62,7 +68,14 @@ async def _search(query: str, top_k: int | None) -> None:
         print()
 
 
-async def _agent(task: str, max_iterations: int) -> None:
+def _interactive_approver(tool_name: str, arguments: dict[str, Any]) -> bool:
+    """Prompt the human before a destructive action (used with --interactive-approval)."""
+    print(f"\n[approval] destructive action requested: {tool_name}({arguments})")
+    answer = input("Approve? [y/N] ").strip().lower()
+    return answer in {"y", "yes"}
+
+
+async def _agent(task: str, max_iterations: int, interactive_approval: bool = False) -> None:
     from researchops.agent.runner import run_agent
     from researchops.agent.tools import build_default_tools
     from researchops.labops import LabClient, SshConnection
@@ -71,7 +84,8 @@ async def _agent(task: str, max_iterations: int) -> None:
     llm = build_llm()
     retriever = Retriever()
     lab_client = LabClient(SshConnection())
-    registry = build_default_tools(retriever, lab_client)
+    approver = _interactive_approver if interactive_approval else None
+    registry = build_default_tools(retriever, lab_client, approver=approver)
     try:
         state = await run_agent(task, llm=llm, registry=registry, max_iterations=max_iterations)
     finally:
@@ -93,7 +107,7 @@ def main() -> None:
 
         mcp.run()
     elif args.command == "agent":
-        asyncio.run(_agent(args.task, args.max_iterations))
+        asyncio.run(_agent(args.task, args.max_iterations, args.interactive_approval))
     else:
         raise SystemExit(f"unknown command: {args.command}")
 
