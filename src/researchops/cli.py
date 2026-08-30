@@ -35,6 +35,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="prompt for human approval before destructive labops actions (submit_job/cancel_job)",
     )
+    p.add_argument(
+        "--trace",
+        action="store_true",
+        help="print a token/cost/latency trace summary after the run",
+    )
     return parser
 
 
@@ -75,7 +80,9 @@ def _interactive_approver(tool_name: str, arguments: dict[str, Any]) -> bool:
     return answer in {"y", "yes"}
 
 
-async def _agent(task: str, max_iterations: int, interactive_approval: bool = False) -> None:
+async def _agent(
+    task: str, max_iterations: int, interactive_approval: bool = False, trace: bool = False
+) -> None:
     from pathlib import Path
 
     from researchops.agent.runner import run_agent
@@ -93,12 +100,24 @@ async def _agent(task: str, max_iterations: int, interactive_approval: bool = Fa
     try:
         Path(".researchops").mkdir(exist_ok=True)  # noqa: ASYNC240  # one-time startup, not hot-path I/O
         await store.init()
-        state = await run_agent(task, llm=llm, registry=registry, max_iterations=max_iterations)
+        if trace:
+            from researchops.observability.trace import traced_run_agent
+
+            state, run_trace = await traced_run_agent(
+                task, llm=llm, registry=registry, max_iterations=max_iterations
+            )
+        else:
+            state = await run_agent(task, llm=llm, registry=registry, max_iterations=max_iterations)
     finally:
         await retriever.close()
         await lab_client.close()
         await store.close()
     print(state.final_report)
+    if trace:
+        import json
+
+        print("\n[trace]")
+        print(json.dumps(run_trace.summary(), ensure_ascii=False, indent=2, default=str))
 
 
 def main() -> None:
@@ -114,7 +133,7 @@ def main() -> None:
 
         mcp.run()
     elif args.command == "agent":
-        asyncio.run(_agent(args.task, args.max_iterations, args.interactive_approval))
+        asyncio.run(_agent(args.task, args.max_iterations, args.interactive_approval, args.trace))
     else:
         raise SystemExit(f"unknown command: {args.command}")
 
