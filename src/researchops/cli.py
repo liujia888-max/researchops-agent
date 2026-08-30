@@ -23,6 +23,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("search", help="hybrid-retrieve against the RAG index")
     p.add_argument("query", help="search query")
     p.add_argument("--top-k", type=int, default=None)
+
+    sub.add_parser("mcp", help="run the labops MCP server over stdio")
     return parser
 
 
@@ -64,6 +66,10 @@ def main() -> None:
         asyncio.run(_ingest(args.pdf))
     elif args.command == "search":
         asyncio.run(_search(args.query, args.top_k))
+    elif args.command == "mcp":
+        from researchops.mcp.server import mcp
+
+        mcp.run()
     else:
         raise SystemExit(f"unknown command: {args.command}")
 

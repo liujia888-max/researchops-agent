@@ -25,6 +25,9 @@ dependencies = [
     "PyMuPDF>=1.24",
     "numpy>=1.26",
     "qdrant-client>=1.11",
+    # Phase 2 — Agent + MCP (labops MCP server over stdio; async SSH to the GPU host)
+    "mcp>=2.0",
+    "asyncssh>=2.14",
 ]
 
 [project.optional-dependencies]

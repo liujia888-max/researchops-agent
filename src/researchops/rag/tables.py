@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Any
 
 # A decimal number (a result value). Method citations are bracketed integers
 # like "[101]", so a bare decimal is unambiguously a value, never a method name.
@@ -50,7 +51,7 @@ def extract_table_rows(path: str) -> list[TableRow]:
     """Recover structured (method x dataset x sigma) rows from a paper PDF."""
     import pymupdf
 
-    doc = pymupdf.open(path)
+    doc: Any = pymupdf.open(path)  # type: ignore[no-untyped-call]
     rows: list[TableRow] = []
     try:
         for page in doc:
@@ -63,16 +64,16 @@ def extract_table_rows(path: str) -> list[TableRow]:
     return rows
 
 
-def _find_caption(page, bbox) -> str:
+def _find_caption(page: Any, bbox: Any) -> str:
     """Return the "Table N. ..." caption line just above a table's bbox."""
     import pymupdf
 
     x0, y0, x1, y1 = bbox
-    rect = pymupdf.Rect(x0 - 10, max(0, y0 - 80), x1 + 10, y0 + 2)
+    rect: Any = pymupdf.Rect(x0 - 10, max(0, y0 - 80), x1 + 10, y0 + 2)  # type: ignore[no-untyped-call]
     for ln in page.get_text("text", clip=rect).splitlines():
         ln = ln.strip()
         if _CAPTION.match(ln):
-            return ln[:80]
+            return str(ln[:80])
     return ""
 
 
@@ -135,12 +136,12 @@ def _parse_table(data: list[list[str | None]], page: int, caption: str) -> list[
                 name = raw_name.strip()
                 if not name:
                     continue
-                values: list[str] = []
+                vals: list[str] = []
                 for col in value_cols:
                     if j < len(col):
-                        values.extend(col[j].split())
-                if len(values) == vals_per_row:
-                    rows.extend(_emit(name, values, datasets, sigmas, page, caption))
+                        vals.extend(col[j].split())
+                if len(vals) == vals_per_row:
+                    rows.extend(_emit(name, vals, datasets, sigmas, page, caption))
 
     return rows
 

@@ -108,7 +108,7 @@ def table_row_recall(results: list[QueryResult], k: int) -> float:
         if not r.gold_table_method:
             continue
         total += 1
-        for text, ctype in zip(r.reranked_texts[:k], r.reranked_types[:k]):
+        for text, ctype in zip(r.reranked_texts[:k], r.reranked_types[:k], strict=False):
             # Match the dataset as its own "on <dataset>:" token so e.g. "BSD68"
             # does not spuriously match the color "CBSD68" row.
             if (

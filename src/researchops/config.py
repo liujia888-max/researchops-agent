@@ -43,6 +43,17 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 20
     retrieval_rerank_top_k: int = 5
 
+    # Phase 2 — labops MCP server: SSH to the GPU host for experiment orchestration.
+    # Defaults point at the current AutoDL host; override via env for any other host.
+    labops_host: str = "connect.westd.seetacloud.com"
+    labops_port: int = 22050
+    labops_user: str = "root"
+    labops_key_path: str = "~/.ssh/id_rsa"
+    # Remote working directory that jobs are sandboxed to.
+    labops_workdir: str = "/root/autodl-tmp"
+    # Per-command SSH timeout (seconds).
+    labops_command_timeout: float = 30.0
+
 
 @lru_cache
 def get_settings() -> Settings:
