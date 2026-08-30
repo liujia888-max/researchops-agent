@@ -4,6 +4,9 @@ Design notes:
 - Every provider speaks the OpenAI-compatible `/chat/completions` shape, so the
   differences (base URL, auth header, model name) are captured in a small config.
 - `chat` returns a normalized dataclass; callers never see provider-specific JSON.
+- Function calling is supported through the same `chat` method: pass OpenAI-format
+  `tools` schemas and read `ChatResponse.tool_calls` / `raw_tool_calls` (the latter
+  is echoed back verbatim on the next turn, as OpenAI-compatible APIs require).
 - `httpx.AsyncClient` is created per-request for now (simple, safe). A shared,
   pooled client with retry/backoff lands alongside LangGraph in Phase 2.
 """
@@ -11,7 +14,9 @@ Design notes:
 from __future__ import annotations
 
 import abc
+import json
 from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 
@@ -20,8 +25,24 @@ from researchops.config import Settings
 
 @dataclass(frozen=True)
 class ChatMessage:
+    """One conversation turn. ``name``/``tool_call_id``/``tool_calls`` are only set
+    for the tool-calling turns the agent layer emits (tool results + assistant calls).
+    """
+
     role: str
     content: str
+    name: str | None = None
+    tool_call_id: str | None = None
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    """A parsed function call the model requested."""
+
+    id: str
+    name: str
+    arguments: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -30,6 +51,8 @@ class ChatResponse:
     model: str
     input_tokens: int = 0
     output_tokens: int = 0
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    raw_tool_calls: list[dict[str, Any]] = field(default_factory=list, repr=False)
     raw: dict[str, object] = field(default_factory=dict, repr=False)
 
 
@@ -55,14 +78,19 @@ class BaseLLM(abc.ABC):
         *,
         temperature: float = 0.7,
         max_tokens: int = 1024,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str = "auto",
     ) -> ChatResponse:
-        """Send a chat request and return a normalized response."""
-        payload = {
+        """Send a chat request (optionally with tool schemas) and return a response."""
+        payload: dict[str, Any] = {
             "model": self.model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": [self._to_payload(m) for m in messages],
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = tool_choice
         headers = {"Authorization": f"Bearer {self.api_key}"}
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
@@ -79,9 +107,13 @@ class BaseLLM(abc.ABC):
 
         data = resp.json()
         try:
-            content = data["choices"][0]["message"]["content"]
+            message = data["choices"][0]["message"]
+            content = message.get("content") or ""
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMError(f"{self.name} malformed response: {data}") from exc
+
+        raw_tool_calls: list[dict[str, Any]] = message.get("tool_calls") or []
+        tool_calls = [self._parse_tool_call(tc) for tc in raw_tool_calls]
 
         usage = data.get("usage", {})
         return ChatResponse(
@@ -89,7 +121,33 @@ class BaseLLM(abc.ABC):
             model=self.model,
             input_tokens=int(usage.get("prompt_tokens", 0)),
             output_tokens=int(usage.get("completion_tokens", 0)),
+            tool_calls=tool_calls,
+            raw_tool_calls=raw_tool_calls,
             raw=data,
+        )
+
+    @staticmethod
+    def _to_payload(message: ChatMessage) -> dict[str, Any]:
+        payload: dict[str, Any] = {"role": message.role, "content": message.content}
+        if message.name is not None:
+            payload["name"] = message.name
+        if message.tool_call_id is not None:
+            payload["tool_call_id"] = message.tool_call_id
+        if message.tool_calls:
+            payload["tool_calls"] = message.tool_calls
+        return payload
+
+    @staticmethod
+    def _parse_tool_call(raw: dict[str, Any]) -> ToolCall:
+        fn = raw.get("function") or {}
+        try:
+            args = json.loads(fn.get("arguments") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            args = {}
+        return ToolCall(
+            id=str(raw.get("id") or ""),
+            name=str(fn.get("name") or ""),
+            arguments=args if isinstance(args, dict) else {},
         )
 
 

@@ -141,6 +141,10 @@ class LabClient:
             )
         return result
 
+    async def close(self) -> None:
+        """Close the underlying transport (idempotent)."""
+        await self._runner.close()
+
     # -- tools --------------------------------------------------------------- #
     async def gpu_info(self) -> list[Gpu]:
         """Current GPU inventory (name, memory, util, temp) via ``nvidia-smi``."""

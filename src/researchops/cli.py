@@ -25,6 +25,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--top-k", type=int, default=None)
 
     sub.add_parser("mcp", help="run the labops MCP server over stdio")
+
+    p = sub.add_parser("agent", help="run the agent end-to-end on a research task")
+    p.add_argument("task", help="the research task, e.g. 'reproduce Restormer on CBSD68'")
+    p.add_argument("--max-iterations", type=int, default=10)
     return parser
 
 
@@ -58,6 +62,24 @@ async def _search(query: str, top_k: int | None) -> None:
         print()
 
 
+async def _agent(task: str, max_iterations: int) -> None:
+    from researchops.agent.runner import run_agent
+    from researchops.agent.tools import build_default_tools
+    from researchops.labops import LabClient, SshConnection
+    from researchops.rag.retriever import Retriever
+
+    llm = build_llm()
+    retriever = Retriever()
+    lab_client = LabClient(SshConnection())
+    registry = build_default_tools(retriever, lab_client)
+    try:
+        state = await run_agent(task, llm=llm, registry=registry, max_iterations=max_iterations)
+    finally:
+        await retriever.close()
+        await lab_client.close()
+    print(state.final_report)
+
+
 def main() -> None:
     args = _build_parser().parse_args()
     if args.command == "ping":
@@ -70,6 +92,8 @@ def main() -> None:
         from researchops.mcp.server import mcp
 
         mcp.run()
+    elif args.command == "agent":
+        asyncio.run(_agent(args.task, args.max_iterations))
     else:
         raise SystemExit(f"unknown command: {args.command}")
 
