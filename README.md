@@ -4,14 +4,19 @@
 
 给它一篇论文 PDF 和一句「复现 Restormer 在 CBSD68 σ=25 上的结果，并和 model_v3_rgb 对比，出报告」，Agent 自主完成：任务拆解 → 检索论文库(RAG) → 读代码/历史实验 → 经 MCP 提交任务到远程 GPU → 轮询日志/解析指标 → 落库并生成带引用的对比报告。
 
-> 当前状态：**Phase 1 —— RAG 子系统已完成**（解析 → 结构分块 → 表格结构化解析 → 混合检索 + RRF + 重排 → 带引用生成 + grounding；golden set 评测 Recall@5=0.857 / Hit@5=1.0 / MRR@5=0.621 / 表格行召回@5=0.50，RAGAS faithfulness=0.958 / answer_relevancy=0.837）。详见 [docs/phase1-rag-results.md](docs/phase1-rag-results.md)。
+> 当前状态：**Phase 1（RAG）✅ · Phase 2（Agent + MCP）✅ · Phase 3 可观测 + 评测 ✅**
+>
+> - **RAG**：Recall@5=0.857 / Hit@5=1.0 / MRR@5=0.621；RAGAS faithfulness=0.958 / answer_relevancy=0.837（[phase1](docs/phase1-rag-results.md)）
+> - **Agent 端到端**：一句话任务 → 自主检索/提交/轮询/落库/出报告；复现 Restormer vs model_v3_rgb 在 CBSD68 σ=25 领先 **+1.81 dB**（[phase2](docs/phase2-repro-results.md)）
+> - **Agent 轨迹评测**（golden set 3 任务）：完成率 **1.0** / 答案正确率 **1.0** / 工具召回 **1.0** / 工具精确率 **0.83** / 平均步数 **1.33** / 单任务成本 **~$0.0027** / 平均延迟 **9.7s**
+>
 > 完整路线见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
 ## 能力三角（对齐 2026 年 AI 应用/Agent 岗 JD）
 
 - **RAG**：论文 PDF → 结构感知分块 → bge-m3 双向量(dense+sparse) → Qdrant 混合检索 + RRF → bge-reranker-v2-m3 重排 → 带引用生成
 - **Agent**：LangGraph 状态机（Plan → Retrieve → Execute → Monitor → Report）+ human-in-the-loop 审批 + 长短期记忆
-- **工程化**：FastAPI + SSE 流式、Docker Compose、Langfuse 可观测、RAGAS/golden-set 评测、自研 MCP Server `labops`
+- **工程化**：FastAPI + SSE 流式、Docker Compose、可观测（自研 trace：token/成本/延迟）、RAGAS/golden-set 评测、自研 MCP Server `labops`
 
 ## 快速开始
 
