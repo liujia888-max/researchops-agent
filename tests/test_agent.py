@@ -3,6 +3,7 @@ LLM / Qdrant / GPU host needed)."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -10,6 +11,7 @@ import pytest
 from researchops.agent.graph import _parse_plan
 from researchops.agent.runner import run_agent
 from researchops.agent.tools import Tool, ToolRegistry, make_labops_tools
+from researchops.db.store import ExperimentStore
 from researchops.labops.schemas import JobHandle, JobStatus
 from researchops.llm.providers import ChatResponse, ToolCall
 
@@ -264,3 +266,81 @@ async def test_approver_can_selectively_deny() -> None:
     )
     await tools["submit_job"].handler(job_id="safe", command="echo ok")
     assert client.submitted == [("safe", "echo ok")]
+
+
+# --------------------------------------------------------------------------- #
+# run_experiment (deterministic submit->poll->persist tool)
+# --------------------------------------------------------------------------- #
+class _RunFakeClient:
+    """Implements just the three methods run_and_collect calls on a LabClient."""
+
+    def __init__(self) -> None:
+        self.submitted: list[tuple[str, str]] = []
+
+    async def submit_job(self, job_id: str, command: str) -> JobHandle:
+        self.submitted.append((job_id, command))
+        return JobHandle(job_id=job_id, running=True)
+
+    async def job_status(self, job_id: str) -> JobStatus:
+        # Already finished: the poll loop breaks immediately.
+        return JobStatus(job_id=job_id, running=False, log_path="", log_exists=True)
+
+    async def tail_log(self, job_id: str, lines: int = 50) -> str:
+        return "{'Sigma': 25, 'Denoise_PSNR': 29.96, 'Denoise_SSIM': 0.86}\n"
+
+
+def _run_experiment_tools(
+    client: object, store: ExperimentStore, **kwargs: Any
+) -> dict[str, Tool]:
+    return {t.name: t for t in make_labops_tools(client, store=store, **kwargs)}  # type: ignore[arg-type]
+
+
+async def test_run_experiment_denies_without_approver() -> None:
+    client = _RunFakeClient()
+    store = ExperimentStore(url="sqlite+aiosqlite:///:memory:")
+    tools = _run_experiment_tools(client, store)
+
+    out = await tools["run_experiment"].handler(experiment_name="e", job_id="j", command="x")
+    assert out.startswith("REJECTED")
+    assert client.submitted == []
+    await store.close()
+
+
+async def test_run_experiment_registered_only_with_store() -> None:
+    client = _RunFakeClient()
+    without = {t.name for t in make_labops_tools(client)}  # type: ignore[arg-type]
+    assert "run_experiment" not in without
+
+    store = ExperimentStore(url="sqlite+aiosqlite:///:memory:")
+    with_store = {t.name for t in make_labops_tools(client, store=store)}  # type: ignore[arg-type]
+    assert "run_experiment" in with_store
+    await store.close()
+
+
+async def test_run_experiment_runs_and_persists(tmp_path: Path) -> None:
+    url = f"sqlite+aiosqlite:///{(tmp_path / 'e.db').as_posix()}"
+    store = ExperimentStore(url=url)
+    await store.init()
+
+    client = _RunFakeClient()
+    tools = _run_experiment_tools(client, store, approver=lambda name, args: True)
+
+    out = await tools["run_experiment"].handler(
+        experiment_name="exp1", job_id="j1", command="echo hi", task="demo"
+    )
+
+    assert '"status": "completed"' in out
+    assert '"metrics"' in out
+    assert client.submitted == [("j1", "echo hi")]
+
+    exp = await store.get_experiment("exp1")
+    assert exp is not None
+    runs = await store.list_runs(exp.id)
+    assert len(runs) == 1
+    assert runs[0].status == "completed"
+    metrics = await store.list_metrics(runs[0].id)
+    assert [(m.name, m.value, m.sigma) for m in metrics] == [
+        ("psnr", 29.96, 25),
+        ("ssim", 0.86, 25),
+    ]
+    await store.close()

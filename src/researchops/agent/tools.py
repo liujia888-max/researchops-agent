@@ -13,6 +13,8 @@ from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from researchops.db.store import ExperimentStore
+from researchops.experiment import run_and_collect
 from researchops.labops import LabClient
 from researchops.rag.retriever import Retriever
 
@@ -123,11 +125,21 @@ def make_rag_search_tool(retriever: Retriever) -> Tool:
     )
 
 
-def make_labops_tools(client: LabClient, *, approver: Approver | None = None) -> list[Tool]:
-    """The seven remote-lab tools, each a thin text-serializing wrapper over LabClient.
+def make_labops_tools(
+    client: LabClient,
+    *,
+    approver: Approver | None = None,
+    store: ExperimentStore | None = None,
+) -> list[Tool]:
+    """The remote-lab tools, each a thin text-serializing wrapper over LabClient.
 
-    ``submit_job`` and ``cancel_job`` are destructive, so they sit behind an ``approver``
+    ``submit_job``/``cancel_job`` are destructive, so they sit behind an ``approver``
     gate. With no approver (the default) they are deny-by-default.
+
+    When a ``store`` is supplied, an eighth ``run_experiment`` tool is registered that
+    wraps the deterministic submit->poll->parse->persist pipeline: the agent names the
+    command, and the tool runs it to completion (no LLM in the polling loop), then
+    returns the parsed metrics. It is likewise gated by the ``approver``.
     """
 
     async def gpu_info() -> str:
@@ -159,7 +171,7 @@ def make_labops_tools(client: LabClient, *, approver: Approver | None = None) ->
     async def fetch_metrics(job_id: str) -> str:
         return _dump((await client.fetch_metrics(job_id)).model_dump())
 
-    return [
+    tools = [
         Tool(
             name="gpu_info",
             description="Read current GPU state (name, memory MB, utilization %, temperature C).",
@@ -234,16 +246,100 @@ def make_labops_tools(client: LabClient, *, approver: Approver | None = None) ->
         ),
     ]
 
+    if store is not None:
+        tools.append(make_run_experiment_tool(client, store, approver=approver))
+
+    return tools
+
+
+def make_run_experiment_tool(
+    client: LabClient, store: ExperimentStore, *, approver: Approver | None = None
+) -> Tool:
+    """One-shot tool wrapping the deterministic submit->poll->parse->persist pipeline.
+
+    The agent names the command; this tool runs it to completion (no LLM in the polling
+    loop), parses PSNR/SSIM from the log, persists Experiment/JobRun/Metric rows, and
+    returns the parsed metrics. Gated by ``approver`` like the other destructive tools.
+    """
+
+    async def run_experiment(
+        experiment_name: str, job_id: str, command: str, task: str = ""
+    ) -> str:
+        rejection = _require_approval(
+            "run_experiment",
+            approver,
+            {"experiment_name": experiment_name, "job_id": job_id, "command": command},
+        )
+        if rejection is not None:
+            return rejection
+        outcome = await run_and_collect(
+            client,
+            store,
+            experiment_name=experiment_name,
+            task=task or f"run {job_id}",
+            job_id=job_id,
+            command=command,
+        )
+        metrics = [
+            {"name": m.name, "value": m.value, "dataset": m.dataset, "sigma": m.sigma}
+            for m in outcome.metrics
+        ]
+        return _dump(
+            {
+                "status": outcome.status,
+                "job_id": outcome.job_id,
+                "elapsed_s": round(outcome.elapsed_s, 1),
+                "metrics": metrics,
+            }
+        )
+
+    return Tool(
+        name="run_experiment",
+        description=(
+            "Run a command on the remote GPU host to completion and persist the result: "
+            "submit a detached job, poll until it finishes or times out, parse PSNR/SSIM "
+            "from the log, and write Experiment/JobRun/Metric rows to the database. Returns "
+            "the parsed metrics. Prefer this over submit_job + job_status + tail_log when the "
+            "task asks to reproduce or evaluate a model. Destructive (executes a command), so "
+            "it requires human approval."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "experiment_name": {
+                    "type": "string",
+                    "description": "unique name for the persisted experiment record",
+                },
+                "job_id": {
+                    "type": "string",
+                    "description": "screen session name, [A-Za-z0-9_-]{1,64}",
+                },
+                "command": {
+                    "type": "string",
+                    "description": "exact shell command to run (already cd'ed into the working dir)",
+                },
+                "task": {
+                    "type": "string",
+                    "description": "human-readable description of what this job does",
+                    "default": "",
+                },
+            },
+            "required": ["experiment_name", "job_id", "command"],
+        },
+        handler=run_experiment,
+    )
+
 
 def build_default_tools(
     retriever: Retriever,
     lab_client: LabClient,
     *,
     approver: Approver | None = None,
+    store: ExperimentStore | None = None,
 ) -> ToolRegistry:
     """Wire the full toolset: paper retrieval + remote-lab orchestration."""
     registry = ToolRegistry()
     registry.register(make_rag_search_tool(retriever))
-    for tool in make_labops_tools(lab_client, approver=approver):
+    for tool in make_labops_tools(lab_client, approver=approver, store=store):
         registry.register(tool)
     return registry

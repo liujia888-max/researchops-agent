@@ -32,7 +32,10 @@ Rules:
 - Gather evidence with `rag_search` (paper library) and the labops tools (remote GPU lab).
 - Never fabricate numbers: every numeric claim must come from a tool result.
 - Cite retrieved chunks by their [n] number exactly as `rag_search` returned them.
-- `submit_job` is destructive; only call it when the task explicitly asks to run a job.
+- To reproduce or evaluate a model, call `run_experiment` once — it submits, polls to
+  completion, parses metrics, and persists them, returning the numbers in a single step.
+- `run_experiment`, `submit_job`, and `cancel_job` are destructive; only call them when
+  the task explicitly asks to run a job. Use `job_status`/`tail_log` only to inspect.
 - Stop calling tools once you have enough evidence to answer; then give a short summary."""
 
 PLANNER_PROMPT = """Break the task into a short, ordered list of concrete steps, each doable

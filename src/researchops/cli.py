@@ -76,21 +76,28 @@ def _interactive_approver(tool_name: str, arguments: dict[str, Any]) -> bool:
 
 
 async def _agent(task: str, max_iterations: int, interactive_approval: bool = False) -> None:
+    from pathlib import Path
+
     from researchops.agent.runner import run_agent
     from researchops.agent.tools import build_default_tools
+    from researchops.db.store import ExperimentStore
     from researchops.labops import LabClient, SshConnection
     from researchops.rag.retriever import Retriever
 
     llm = build_llm()
     retriever = Retriever()
     lab_client = LabClient(SshConnection())
+    store = ExperimentStore()
     approver = _interactive_approver if interactive_approval else None
-    registry = build_default_tools(retriever, lab_client, approver=approver)
+    registry = build_default_tools(retriever, lab_client, approver=approver, store=store)
     try:
+        Path(".researchops").mkdir(exist_ok=True)  # noqa: ASYNC240  # one-time startup, not hot-path I/O
+        await store.init()
         state = await run_agent(task, llm=llm, registry=registry, max_iterations=max_iterations)
     finally:
         await retriever.close()
         await lab_client.close()
+        await store.close()
     print(state.final_report)
 
 
