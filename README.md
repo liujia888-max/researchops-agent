@@ -4,7 +4,7 @@
 
 给它一篇论文 PDF 和一句「复现 Restormer 在 CBSD68 σ=25 上的结果，并和 model_v3_rgb 对比，出报告」，Agent 自主完成：任务拆解 → 检索论文库(RAG) → 读代码/历史实验 → 经 MCP 提交任务到远程 GPU → 轮询日志/解析指标 → 落库并生成带引用的对比报告。
 
-> 当前状态：**Phase 1 —— RAG 子系统已完成**（解析 → 结构分块 → 混合检索 + RRF + 重排 → 带引用生成 + grounding，golden set 评测 Recall@5=0.893 / Hit@5=1.0 / MRR=0.657）。详见 [docs/phase1-rag-results.md](docs/phase1-rag-results.md)。
+> 当前状态：**Phase 1 —— RAG 子系统已完成**（解析 → 结构分块 → 表格结构化解析 → 混合检索 + RRF + 重排 → 带引用生成 + grounding；golden set 评测 Recall@5=0.857 / Hit@5=1.0 / MRR@5=0.621 / 表格行召回@5=0.50，RAGAS faithfulness=0.958 / answer_relevancy=0.837）。详见 [docs/phase1-rag-results.md](docs/phase1-rag-results.md)。
 > 完整路线见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
 ## 能力三角（对齐 2026 年 AI 应用/Agent 岗 JD）

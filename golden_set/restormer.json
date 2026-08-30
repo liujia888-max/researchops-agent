@@ -35,16 +35,18 @@
     {
       "id": "r005",
       "query": "What PSNR does Restormer achieve on CBSD68 for Gaussian color image denoising?",
-      "gold_pages": [7, 8],
-      "answer": "Around 34.67 dB at sigma=25 (state of the art across sigma=15/25/50).",
-      "note": "Denoising table in Experiments."
+      "gold_pages": [7],
+      "answer": "31.79 dB at sigma=25 (separate-model variant; 34.40 dB at sigma=15 and 28.60 dB at sigma=50).",
+      "note": "Color denoising table (Table 5) CBSD68 column. The earlier 34.67 was wrong: that is DSNet on McMaster at sigma=15.",
+      "gold_table": { "method": "Restormer", "dataset": "CBSD68" }
     },
     {
       "id": "r006",
       "query": "How does Restormer compare to SwinIR on Gaussian grayscale denoising?",
-      "gold_pages": [7, 8],
-      "answer": "Restormer outperforms SwinIR by a notable PSNR margin while being more efficient.",
-      "note": "Denoising comparison table."
+      "gold_pages": [7],
+      "answer": "Restormer matches or beats SwinIR's PSNR on BSD68/Set12/Urban100 while using far fewer parameters, so it is more efficient.",
+      "note": "Grayscale denoising table (Table 4).",
+      "gold_table": { "method": "Restormer", "dataset": "BSD68" }
     },
     {
       "id": "r007",

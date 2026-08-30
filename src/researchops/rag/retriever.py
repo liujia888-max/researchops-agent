@@ -92,5 +92,6 @@ def _point_to_chunk(point: models.ScoredPoint) -> Chunk:
         doc_id=str(payload.get("doc_id", "")),
         page=int(payload.get("page", 0)),
         section=str(payload.get("section", "")),
+        chunk_type=str(payload.get("chunk_type", "prose")),
         chunk_index=int(payload.get("chunk_index", 0)),
     )

@@ -73,6 +73,7 @@ class QdrantStore:
                         "doc_id": c.doc_id,
                         "page": c.page,
                         "section": c.section,
+                        "chunk_type": c.chunk_type,
                         "chunk_index": c.chunk_index,
                         "text": c.text,
                     },

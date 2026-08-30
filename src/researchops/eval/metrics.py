@@ -19,7 +19,7 @@ ordering (``fused_pages``) and the cross-encoder-reranked ordering
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -30,6 +30,14 @@ class QueryResult:
     gold_pages: list[int]
     reranked_pages: list[int]  # final ordering (after rerank)
     fused_pages: list[int] | None = None  # RRF ordering (before rerank), if captured
+
+    # Table-row recall support (optional; only populated by the table-aware
+    # runner). ``reranked_texts``/``reranked_types`` are the top-k chunk texts
+    # and their ``chunk_type`` in rank order.
+    gold_table_method: str | None = None
+    gold_table_dataset: str | None = None
+    reranked_texts: list[str] = field(default_factory=list)
+    reranked_types: list[str] = field(default_factory=list)
 
 
 def recall_at_k(gold: list[int], retrieved: list[int], k: int) -> float:
@@ -84,6 +92,33 @@ def rerank_delta(results: list[QueryResult], k: int) -> float:
     before = sum(recall_at_k(r.gold_pages, r.fused_pages or [], k) for r in usable) / len(usable)
     after = sum(recall_at_k(r.gold_pages, r.reranked_pages, k) for r in usable) / len(usable)
     return after - before
+
+
+def table_row_recall(results: list[QueryResult], k: int) -> float:
+    """Fraction of table-centric queries whose top-k contains the gold table row.
+
+    A query is "table-centric" when ``gold_table_method`` is set. It is counted
+    as recalled when some top-k chunk is a ``table_row`` whose text carries both
+    the gold method and dataset labels — i.e. the *structured* row surfaced, not
+    just the prose number soup. Returns 0.0 when no query is table-centric.
+    """
+    total = 0
+    hit = 0
+    for r in results:
+        if not r.gold_table_method:
+            continue
+        total += 1
+        for text, ctype in zip(r.reranked_texts[:k], r.reranked_types[:k]):
+            # Match the dataset as its own "on <dataset>:" token so e.g. "BSD68"
+            # does not spuriously match the color "CBSD68" row.
+            if (
+                ctype == "table_row"
+                and r.gold_table_method in text
+                and f"on {r.gold_table_dataset}:" in text
+            ):
+                hit += 1
+                break
+    return hit / total if total else 0.0
 
 
 def summarize(results: list[QueryResult], *, k: int = 5) -> dict[str, float]:

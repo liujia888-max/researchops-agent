@@ -13,6 +13,7 @@ class Chunk:
     doc_id: str
     page: int
     section: str = ""
+    chunk_type: str = "prose"  # "prose" | "table_row"
     chunk_index: int = 0
 
     # Embeddings are filled in by the embedder; kept None until then so chunking
