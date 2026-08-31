@@ -45,3 +45,55 @@ def test_experiments_returns_persisted_records(tmp_path, monkeypatch) -> None:
     assert data[0]["runs"][0]["metrics"] == [
         {"name": "psnr", "value": 29.96, "dataset": None, "sigma": 25}
     ]
+
+
+class _FakeEmbedder:
+    async def embed_chunks(self, chunks) -> None:
+        for c in chunks:
+            c.dense = [0.0] * 1024
+            c.sparse_indices = [0]
+            c.sparse_values = [1.0]
+
+
+class _FakeQdrantStore:
+    def __init__(self, settings=None) -> None:
+        pass
+
+    async def upsert(self, chunks) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+
+def test_upload_document_txt(tmp_path, monkeypatch) -> None:
+    """Uploading a .txt parses, chunks, and ingests (with embed/store faked)."""
+    import researchops.rag.ingest as ingest_mod
+    import researchops.server.main as main_mod
+
+    monkeypatch.setattr(ingest_mod, "Embedder", _FakeEmbedder)
+    monkeypatch.setattr(ingest_mod, "QdrantStore", _FakeQdrantStore)
+    monkeypatch.setattr(main_mod, "UPLOAD_DIR", tmp_path / "uploads")
+
+    client = TestClient(app)
+    resp = client.post(
+        "/documents",
+        files={"file": ("notes.txt", "Introduction\n\nWe propose a method.", "text/plain")},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["doc_id"] == "notes"
+    assert body["chunks"] >= 1
+    assert (tmp_path / "uploads" / "notes.txt").exists()
+
+
+def test_upload_document_rejects_unsupported(tmp_path, monkeypatch) -> None:
+    import researchops.server.main as main_mod
+
+    monkeypatch.setattr(main_mod, "UPLOAD_DIR", tmp_path / "uploads")
+    client = TestClient(app)
+    resp = client.post(
+        "/documents",
+        files={"file": ("legacy.doc", b"not a docx", "application/msword")},
+    )
+    assert resp.status_code == 400

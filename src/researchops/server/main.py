@@ -17,12 +17,13 @@ line. Tracing is always on; Langfuse export is opt-in per request.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -30,6 +31,7 @@ from pydantic import BaseModel, Field
 from researchops.config import Settings, get_settings
 from researchops.llm import BaseLLM, build_llm
 from researchops.llm.providers import ChatMessage, LLMError
+from researchops.rag.parser import SUPPORTED_EXTENSIONS
 
 
 @asynccontextmanager
@@ -39,6 +41,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="ResearchOps Agent", version="0.1.0", lifespan=lifespan)
+
+# Uploaded documents land here (git-ignored), then get ingested into Qdrant.
+UPLOAD_DIR = Path(".researchops/uploads")
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+
+def _safe_filename(name: str) -> str:
+    """Neutralize a user-supplied filename against path traversal / weird chars."""
+    stem = Path(name).name
+    sanitized = re.sub(r"[^\w.\- ]", "_", stem)
+    return sanitized.strip("._ ") or "upload"
 
 # The Next.js dev server runs on :3000 and calls this API cross-origin.
 app.add_middleware(
@@ -199,5 +212,60 @@ async def experiments() -> list[dict[str, Any]]:
                 }
             )
         return list(reversed(result))
+    finally:
+        await store.close()
+
+
+@app.post("/documents")
+async def upload_document(file: UploadFile = File(...)) -> dict[str, Any]:  # noqa: B008 — FastAPI upload idiom
+    """Upload a document (pdf/docx/txt/md), ingest it into the RAG index.
+
+    Saves the file under ``UPLOAD_DIR``, then runs parse -> chunk -> embed -> upsert.
+    Returns the assigned ``doc_id`` and the number of chunks indexed.
+    """
+    from researchops.rag.ingest import doc_id_from_path, ingest_document
+    from researchops.rag.parser import UnsupportedFormatError
+
+    filename = _safe_filename(file.filename or "")
+    suffix = Path(filename).suffix.lower()
+    if suffix not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"unsupported type {suffix or '(none)'!r}; "
+                f"supported: pdf / docx / txt / md (please 'save as .docx' for Word)"
+            ),
+        )
+
+    data = await file.read()
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="file too large (max 50MB)")
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240 — one-time save, not hot-path I/O
+    dest = UPLOAD_DIR / filename
+    i = 1
+    while dest.exists():
+        dest = UPLOAD_DIR / f"{Path(filename).stem}_{i}{suffix}"
+        i += 1
+    dest.write_bytes(data)
+
+    try:
+        chunks = await ingest_document(dest)
+    except UnsupportedFormatError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — embedder/Qdrant outage surfaces as 500
+        raise HTTPException(status_code=500, detail=f"ingest failed: {exc}") from exc
+
+    return {"filename": dest.name, "doc_id": doc_id_from_path(dest), "chunks": chunks}
+
+
+@app.get("/documents")
+async def documents() -> list[dict[str, Any]]:
+    """List the documents currently indexed in the RAG store."""
+    from researchops.rag.qdrant_store import QdrantStore
+
+    store = QdrantStore()
+    try:
+        return await store.list_documents()
     finally:
         await store.close()

@@ -70,6 +70,8 @@ NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000 npm run dev
 
 > Windows 本机注意：`node`/`npm` 不在 PATH，用 `$env:Path = "D:\;" + $env:Path` 或直接 `& "D:\node.exe" "D:\node_modules\npm\bin\npm-cli.js" run dev`。
 
+网页端支持**直接上传文档入库**：点击「文档库」面板的上传按钮，选择 PDF / Word(.docx) / txt / md 文件，上传后即解析→分块→向量化→入库 Qdrant，成为 Agent `rag_search` 的检索语料。也提供 `POST /documents`（multipart 上传）和 `GET /documents`（列出已入库文档）两个 REST 接口。
+
 ## 别人用 Docker 一键起基础设施（可选）
 
 本机无 Docker 也没关系；有 Docker 的环境可以起 postgres/redis/qdrant/langfuse：

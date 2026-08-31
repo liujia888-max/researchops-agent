@@ -9,6 +9,7 @@ Hybrid retrieval fuses both branches with RRF in the retriever.
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from qdrant_client import AsyncQdrantClient, models
 
@@ -80,6 +81,35 @@ class QdrantStore:
                 )
             )
         await self._client.upsert(collection_name=self.collection, points=points)
+
+    async def list_documents(self) -> list[dict[str, object]]:
+        """Return the distinct ingested documents and their chunk counts.
+
+        Used by the web UI's "document library" panel. Scrolls the collection's
+        ``doc_id`` payloads (no vectors) and groups by document.
+        """
+        await self.ensure_collection()
+        counts: dict[str, int] = {}
+        offset: Any = None
+        while True:
+            points, offset = await self._client.scroll(
+                collection_name=self.collection,
+                limit=256,
+                offset=offset,
+                with_payload=["doc_id"],
+                with_vectors=False,
+            )
+            if not points:
+                break
+            for p in points:
+                doc_id = str((p.payload or {}).get("doc_id", "?"))
+                counts[doc_id] = counts.get(doc_id, 0) + 1
+            if offset is None:
+                break
+        return [
+            {"doc_id": doc_id, "chunks": n}
+            for doc_id, n in sorted(counts.items())
+        ]
 
     async def close(self) -> None:
         await self._client.close()

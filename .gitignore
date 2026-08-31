@@ -24,6 +24,9 @@ qdrant_storage/
 *.db
 *.sqlite3
 
+# 本地运行时状态：实验库 + 上传的原始文档（.researchops/experiments.db、uploads/）
+.researchops/
+
 # 远程同步产物（本地打包 src 用，不入库）
 *.tgz
 

@@ -35,6 +35,11 @@ type Experiment = {
   }[];
 };
 
+type Doc = {
+  doc_id: string;
+  chunks: number;
+};
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -148,6 +153,9 @@ export default function Home() {
   const [langfuseUrl, setLangfuseUrl] = useState("");
   const [error, setError] = useState("");
   const [experiments, setExperiments] = useState<Experiment[]>([]);
+  const [documents, setDocuments] = useState<Doc[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   async function refreshExperiments() {
@@ -159,9 +167,44 @@ export default function Home() {
     }
   }
 
+  async function refreshDocuments() {
+    try {
+      const res = await fetch(`${API_BASE}/documents`);
+      if (res.ok) setDocuments(await res.json());
+    } catch {
+      // Qdrant not reachable — keep last list
+    }
+  }
+
   useEffect(() => {
     refreshExperiments();
+    refreshDocuments();
   }, []);
+
+  async function uploadFiles(files: FileList | null) {
+    if (!files || files.length === 0 || uploading) return;
+    setUploading(true);
+    setUploadMsg("");
+    const results: string[] = [];
+    for (const f of Array.from(files)) {
+      const form = new FormData();
+      form.append("file", f);
+      try {
+        const res = await fetch(`${API_BASE}/documents`, { method: "POST", body: form });
+        const body = await res.json().catch(() => null);
+        if (res.ok && body) {
+          results.push(`${body.filename} → ${body.chunks} chunks`);
+        } else {
+          results.push(`${f.name} 失败：${body?.detail ?? res.status}`);
+        }
+      } catch (e) {
+        results.push(`${f.name} 失败：${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    setUploadMsg(results.join("\n"));
+    setUploading(false);
+    refreshDocuments();
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -387,6 +430,51 @@ export default function Home() {
               ))}
             </div>
           ))
+        )}
+      </div>
+
+      <div className="card documents">
+        <div className="head" style={{ fontWeight: 600, marginBottom: 10 }}>
+          文档库（RAG 检索源）
+        </div>
+        <div className="row" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <label className="btn secondary" style={{ cursor: "pointer" }}>
+            {uploading ? "上传中…" : "上传文档"}
+            <input
+              type="file"
+              multiple
+              accept=".pdf,.docx,.txt,.md,.markdown"
+              style={{ display: "none" }}
+              disabled={uploading}
+              onChange={(e) => {
+                uploadFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          <button className="btn secondary" onClick={refreshDocuments}>
+            刷新
+          </button>
+          <span className="muted">支持 PDF / Word(.docx) / txt / md</span>
+        </div>
+        {uploadMsg && (
+          <pre className="output" style={{ marginTop: 10 }}>
+            {uploadMsg}
+          </pre>
+        )}
+        {documents.length === 0 ? (
+          <p className="muted" style={{ marginTop: 10 }}>
+            暂无已入库文档（上传后这里会列出，并成为 Agent 检索的语料）
+          </p>
+        ) : (
+          <div style={{ marginTop: 10 }}>
+            {documents.map((d) => (
+              <div key={d.doc_id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+                <span>{d.doc_id}</span>
+                <span className="muted">{d.chunks} chunks</span>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 

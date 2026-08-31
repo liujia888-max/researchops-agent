@@ -156,3 +156,68 @@ def _split_long_block(block: str, max_chars: int, overlap_chars: int) -> list[st
             break
         start = end - overlap_chars
     return pieces
+
+
+def chunk_text(
+    text: str,
+    *,
+    doc_id: str,
+    max_chars: int = 1200,
+    overlap_chars: int = 150,
+) -> list[Chunk]:
+    """Chunk free-form prose (Word / txt / markdown) by paragraph.
+
+    Unlike ``chunk_pages`` (which reconstructs two-column PDF text by joining
+    sentence fragments), plain documents already have meaningful paragraph breaks,
+    so the unit of packing is the paragraph, not the line. Section headings are
+    still detected with the shared heuristic and tag the following chunks.
+    """
+    chunks: list[Chunk] = []
+
+    def make(chunk_text_: str, cur_section: str) -> None:
+        chunk_text_ = chunk_text_.strip()
+        if chunk_text_:
+            chunks.append(
+                Chunk(
+                    text=chunk_text_,
+                    doc_id=doc_id,
+                    page=1,
+                    section=cur_section,
+                    chunk_index=len(chunks),
+                )
+            )
+
+    buf: list[str] = []
+    buf_len = 0
+
+    def flush(cur_section: str) -> None:
+        nonlocal buf, buf_len
+        if not buf:
+            return
+        body = "\n\n".join(buf)
+        make(body, cur_section)
+        tail = body[-overlap_chars:] if overlap_chars > 0 else ""
+        buf = [tail] if tail else []
+        buf_len = len(tail)
+
+    section = ""
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text)]
+    for para in paragraphs:
+        if not para:
+            continue
+        if _is_heading(para):
+            flush(section)
+            section = para
+            continue
+        if len(para) > max_chars:
+            flush(section)
+            for piece in _split_long_block(para, max_chars, overlap_chars):
+                make(piece, section)
+            continue
+        if buf and buf_len + len(para) + 2 > max_chars:
+            flush(section)
+        buf.append(para)
+        buf_len += len(para) + 2
+
+    flush(section)
+    return chunks
