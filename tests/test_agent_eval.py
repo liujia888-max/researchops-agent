@@ -81,6 +81,13 @@ def test_task_passed_requires_facts() -> None:
     assert task_passed(task, _outcome(finished=False, final_report="PSNR 31.79 dB")) is False
 
 
+def test_task_passed_accepts_alternative_facts() -> None:
+    task = GoldenTask(id="t", task="q", expected_facts=[["31.78", "31.79"]])
+    assert task_passed(task, _outcome(finished=True, final_report="PSNR 31.78 dB")) is True
+    assert task_passed(task, _outcome(finished=True, final_report="PSNR 31.79 dB")) is True
+    assert task_passed(task, _outcome(finished=True, final_report="PSNR 30.00 dB")) is False
+
+
 def test_compute_report_aggregates() -> None:
     tasks = [GoldenTask(id="a", task="q", expected_tools=["rag"], expected_facts=["31.79"])]
     outcomes = [
@@ -140,11 +147,13 @@ def test_load_tasks_from_json(tmp_path: Any) -> None:
             [
                 {"id": "a", "task": "q1", "expected_tools": ["rag_search"], "expected_facts": ["31.79"]},
                 {"id": "b", "task": "q2"},
+                {"id": "c", "task": "q3", "expected_facts": [["31.78", "31.79"]]},
             ]
         ),
         encoding="utf-8",
     )
     tasks = load_tasks(str(p))
-    assert len(tasks) == 2
+    assert len(tasks) == 3
     assert tasks[0].expected_facts == ["31.79"]
     assert tasks[1].expected_tools == []
+    assert tasks[2].expected_facts == [["31.78", "31.79"]]

@@ -3,7 +3,7 @@
     "id": "restormer-cbsd68-psnr",
     "task": "Restormer 在 CBSD68 彩色去噪 σ=25 上的 PSNR 是多少？请检索论文并给出带引用的答案。",
     "expected_tools": ["rag_search"],
-    "expected_facts": ["31.79"]
+    "expected_facts": [["31.78", "31.79"]]
   },
   {
     "id": "gpu-inventory",

@@ -27,12 +27,18 @@ from researchops.observability.trace import Trace, traced_run_agent
 
 @dataclass(frozen=True)
 class GoldenTask:
-    """One golden case: the task, the tools it should use, and facts its answer must state."""
+    """One golden case: the task, the tools it should use, and facts its answer must state.
+
+    ``expected_facts`` entries are either a literal substring (must appear in the
+    report) or a list of acceptable alternatives (any one must appear). The list form
+    covers paper-specific noise — e.g. ``["31.78", "31.79"]`` for a PSNR that appears
+    rounded differently across tables.
+    """
 
     id: str
     task: str
     expected_tools: list[str] = field(default_factory=list)
-    expected_facts: list[str] = field(default_factory=list)
+    expected_facts: list[str | list[str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -79,13 +85,19 @@ def tool_precision(expected: list[str], called: list[str]) -> float:
     return len(set(expected) & set(called)) / len(called)
 
 
+def _fact_matches(report: str, fact: str | list[str]) -> bool:
+    """True when a fact (literal or list of alternatives) appears in the report."""
+    alts = fact if isinstance(fact, list) else [fact]
+    return any(alt in report for alt in alts)
+
+
 def task_passed(task: GoldenTask, outcome: TaskOutcome) -> bool:
     """True when the run finished and its report contains every expected fact."""
     if not outcome.finished:
         return False
     if not task.expected_facts:
         return True
-    return all(fact in outcome.final_report for fact in task.expected_facts)
+    return all(_fact_matches(outcome.final_report, fact) for fact in task.expected_facts)
 
 
 @dataclass
@@ -163,7 +175,10 @@ async def run_eval(
 
 
 def load_tasks(path: str) -> list[GoldenTask]:
-    """Load golden tasks from a JSON file (a list of task objects)."""
+    """Load golden tasks from a JSON file (a list of task objects).
+
+    ``expected_facts`` entries may be a string or a list of alternative strings.
+    """
     with open(path, encoding="utf-8") as f:
         raw: list[dict[str, Any]] = json.load(f)
     return [
@@ -171,7 +186,10 @@ def load_tasks(path: str) -> list[GoldenTask]:
             id=str(item["id"]),
             task=str(item["task"]),
             expected_tools=[str(t) for t in item.get("expected_tools", [])],
-            expected_facts=[str(fact) for fact in item.get("expected_facts", [])],
+            expected_facts=[
+                [str(a) for a in fact] if isinstance(fact, list) else str(fact)
+                for fact in item.get("expected_facts", [])
+            ],
         )
         for item in raw
     ]
