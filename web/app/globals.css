@@ -35,13 +35,80 @@ a:hover {
 }
 
 .container {
-  max-width: 880px;
+  max-width: 1240px;
   margin: 0 auto;
-  padding: 32px 20px 80px;
+  padding: 20px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 两栏布局：左侧历史记录，右侧输出 + 输入框 */
+.layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 16px;
+}
+
+.sidebar {
+  flex: 0 0 320px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.main .card,
+.sidebar .card {
+  margin-bottom: 0;
+}
+
+/* 生成内容区域：独立滚动，不干扰整页 */
+.output {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.empty {
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+  padding: 60px 20px;
+}
+
+@media (max-width: 860px) {
+  .container {
+    height: auto;
+  }
+  .layout {
+    flex-direction: column;
+  }
+  .sidebar {
+    flex: none;
+    overflow-y: visible;
+  }
+  .main {
+    height: auto;
+  }
+  .output {
+    overflow-y: visible;
+  }
 }
 
 header.brand {
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 header.brand h1 {
   margin: 0;

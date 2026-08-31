@@ -156,7 +156,17 @@ export default function Home() {
   const [documents, setDocuments] = useState<Doc[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
-  const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Auto-follow the stream only while the user is already at the bottom; a manual
+  // scroll up disables it so reading isn't yanked back down mid-generation.
+  const outputRef = useRef<HTMLDivElement>(null);
+  const stickToBottom = useRef(true);
+
+  function onOutputScroll() {
+    const el = outputRef.current;
+    if (!el) return;
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }
 
   async function refreshExperiments() {
     try {
@@ -180,6 +190,12 @@ export default function Home() {
     refreshExperiments();
     refreshDocuments();
   }, []);
+
+  useEffect(() => {
+    if (stickToBottom.current && outputRef.current) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }
+  }, [steps, report, trace]);
 
   async function uploadFiles(files: FileList | null) {
     if (!files || files.length === 0 || uploading) return;
@@ -217,10 +233,6 @@ export default function Home() {
     }
   }
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [steps, report]);
-
   async function run() {
     if (!task.trim() || running) return;
     setRunning(true);
@@ -229,6 +241,7 @@ export default function Home() {
     setReport("");
     setTrace(null);
     setLangfuseUrl("");
+    stickToBottom.current = true;
 
     try {
       const res = await fetch(`${API_BASE}/agent/stream`, {
@@ -317,197 +330,209 @@ export default function Home() {
         <p>一句话任务 → 自主检索 / 提交 / 出报告</p>
       </header>
 
-      <div className="card composer">
-        <textarea
-          value={task}
-          onChange={(e) => setTask(e.target.value)}
-          placeholder="例如：复现 Restormer 的 Gaussian Color Blind 在 CBSD68 σ=25 上的结果，并和 model_v3_rgb 对比，出报告"
-        />
-        <div className="row">
-          <button className="btn" onClick={run} disabled={running || !task.trim()}>
-            {running ? (
-              <>
-                <span className="spinner" /> 运行中…
-              </>
-            ) : (
-              "开始"
+      <div className="layout">
+        <aside className="sidebar">
+          <div className="card documents">
+            <div className="head" style={{ fontWeight: 600, marginBottom: 10 }}>
+              文档库（RAG 检索源）
+            </div>
+            <div className="row" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <label className="btn secondary" style={{ cursor: "pointer" }}>
+                {uploading ? "上传中…" : "上传文档"}
+                <input
+                  type="file"
+                  multiple
+                  accept=".pdf,.docx,.txt,.md,.markdown"
+                  style={{ display: "none" }}
+                  disabled={uploading}
+                  onChange={(e) => {
+                    uploadFiles(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              <button className="btn secondary" onClick={refreshDocuments}>
+                刷新
+              </button>
+              <span className="muted">PDF / Word(.docx) / txt / md</span>
+            </div>
+            {uploadMsg && (
+              <pre className="output" style={{ marginTop: 10 }}>
+                {uploadMsg}
+              </pre>
             )}
-          </button>
-          <label>
-            最大步数
-            <input
-              type="number"
-              min={1}
-              max={50}
-              value={maxIterations}
-              onChange={(e) => setMaxIterations(Number(e.target.value) || 10)}
-              style={{ width: 60, padding: "4px 8px", border: "1px solid var(--border)", borderRadius: 6 }}
-            />
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={langfuse}
-              onChange={(e) => setLangfuse(e.target.checked)}
-            />
-            Langfuse 追踪
-          </label>
-          <span className="muted">后端 {API_BASE}</span>
-        </div>
-      </div>
-
-      {error && <div className="error">{error}</div>}
-
-      {steps.length > 0 && (
-        <div className="card">
-          {steps.map((s, i) => (
-            <StepView key={i} step={s} />
-          ))}
-        </div>
-      )}
-
-      {report && (
-        <div className="card">
-          <div className="head" style={{ fontWeight: 600, marginBottom: 8 }}>
-            最终报告
-          </div>
-          <div className="report" dangerouslySetInnerHTML={{ __html: renderMarkdown(report) }} />
-        </div>
-      )}
-
-      {trace && (
-        <div className="card">
-          <div className="head" style={{ fontWeight: 600, marginBottom: 10 }}>
-            本次 Trace
-          </div>
-          <div className="trace-grid">
-            <div className="cell">
-              <div className="k">LLM 调用</div>
-              <div className="v">{trace.llm_calls ?? "-"}</div>
-            </div>
-            <div className="cell">
-              <div className="k">工具调用</div>
-              <div className="v">{trace.tool_calls ?? "-"}</div>
-            </div>
-            <div className="cell">
-              <div className="k">总 Token</div>
-              <div className="v">{trace.total_tokens ?? "-"}</div>
-            </div>
-            <div className="cell">
-              <div className="k">成本</div>
-              <div className="v">${(trace.cost_usd ?? 0).toFixed(4)}</div>
-            </div>
-          </div>
-          {langfuseUrl && (
-            <p className="muted" style={{ marginTop: 10 }}>
-              <a href={langfuseUrl} target="_blank" rel="noreferrer">
-                在 Langfuse 查看完整 trace →
-              </a>
-            </p>
-          )}
-        </div>
-      )}
-
-      <div className="card experiments">
-        <div className="head" style={{ fontWeight: 600, marginBottom: 10 }}>
-          历史实验
-        </div>
-        {experiments.length === 0 ? (
-          <p className="muted">暂无实验记录</p>
-        ) : (
-          experiments.map((exp) => (
-            <div className="exp" key={exp.id}>
-              <div className="name">
-                #{exp.id} {exp.name}
-              </div>
-              {exp.runs.map((run, i) => (
-                <div className="run" key={i}>
-                  <span className="meta">状态</span>{" "}
-                  <span className={`badge ${run.status === "success" ? "ok" : "other"}`}>
-                    {run.status}
-                  </span>
-                  {run.metrics.length > 0 && (
-                    <div className="metrics">
-                      {run.metrics.map((m, i) => (
-                        <span className="m" key={i}>
-                          {m.name}
-                          {m.sigma != null ? ` σ${m.sigma}` : ""}:{" "}
-                          {typeof m.value === "number" ? m.value.toFixed(3) : m.value}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          ))
-        )}
-      </div>
-
-      <div className="card documents">
-        <div className="head" style={{ fontWeight: 600, marginBottom: 10 }}>
-          文档库（RAG 检索源）
-        </div>
-        <div className="row" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <label className="btn secondary" style={{ cursor: "pointer" }}>
-            {uploading ? "上传中…" : "上传文档"}
-            <input
-              type="file"
-              multiple
-              accept=".pdf,.docx,.txt,.md,.markdown"
-              style={{ display: "none" }}
-              disabled={uploading}
-              onChange={(e) => {
-                uploadFiles(e.target.files);
-                e.target.value = "";
-              }}
-            />
-          </label>
-          <button className="btn secondary" onClick={refreshDocuments}>
-            刷新
-          </button>
-          <span className="muted">支持 PDF / Word(.docx) / txt / md</span>
-        </div>
-        {uploadMsg && (
-          <pre className="output" style={{ marginTop: 10 }}>
-            {uploadMsg}
-          </pre>
-        )}
-        {documents.length === 0 ? (
-          <p className="muted" style={{ marginTop: 10 }}>
-            暂无已入库文档（上传后这里会列出，并成为 Agent 检索的语料）
-          </p>
-        ) : (
-          <div style={{ marginTop: 10 }}>
-            {documents.map((d) => (
-              <div
-                key={d.doc_id}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "6px 0",
-                  borderBottom: "1px solid var(--border)",
-                }}
-              >
-                <span>{d.doc_id}</span>
-                <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <span className="muted">{d.chunks} chunks</span>
-                  <button
-                    className="btn secondary"
-                    style={{ padding: "2px 10px", fontSize: 12 }}
-                    onClick={() => deleteDocument(d.doc_id)}
+            {documents.length === 0 ? (
+              <p className="muted" style={{ marginTop: 10 }}>
+                暂无已入库文档
+              </p>
+            ) : (
+              <div style={{ marginTop: 10 }}>
+                {documents.map((d) => (
+                  <div
+                    key={d.doc_id}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "6px 0",
+                      borderBottom: "1px solid var(--border)",
+                    }}
                   >
-                    删除
-                  </button>
-                </span>
+                    <span style={{ wordBreak: "break-all", paddingRight: 8 }}>{d.doc_id}</span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                      <span className="muted">{d.chunks} chunks</span>
+                      <button
+                        className="btn secondary"
+                        style={{ padding: "2px 10px", fontSize: 12 }}
+                        onClick={() => deleteDocument(d.doc_id)}
+                      >
+                        删除
+                      </button>
+                    </span>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
-        )}
-      </div>
 
-      <div ref={bottomRef} />
+          <div className="card experiments">
+            <div className="head" style={{ fontWeight: 600, marginBottom: 10 }}>
+              历史实验
+            </div>
+            {experiments.length === 0 ? (
+              <p className="muted">暂无实验记录</p>
+            ) : (
+              experiments.map((exp) => (
+                <div className="exp" key={exp.id}>
+                  <div className="name">
+                    #{exp.id} {exp.name}
+                  </div>
+                  {exp.runs.map((run, i) => (
+                    <div className="run" key={i}>
+                      <span className="meta">状态</span>{" "}
+                      <span className={`badge ${run.status === "success" ? "ok" : "other"}`}>
+                        {run.status}
+                      </span>
+                      {run.metrics.length > 0 && (
+                        <div className="metrics">
+                          {run.metrics.map((m, i) => (
+                            <span className="m" key={i}>
+                              {m.name}
+                              {m.sigma != null ? ` σ${m.sigma}` : ""}:{" "}
+                              {typeof m.value === "number" ? m.value.toFixed(3) : m.value}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ))
+            )}
+          </div>
+        </aside>
+
+        <main className="main">
+          <div className="output" ref={outputRef} onScroll={onOutputScroll}>
+            {error && <div className="error">{error}</div>}
+
+            {steps.length > 0 && (
+              <div className="card">
+                {steps.map((s, i) => (
+                  <StepView key={i} step={s} />
+                ))}
+              </div>
+            )}
+
+            {report && (
+              <div className="card">
+                <div className="head" style={{ fontWeight: 600, marginBottom: 8 }}>
+                  最终报告
+                </div>
+                <div className="report" dangerouslySetInnerHTML={{ __html: renderMarkdown(report) }} />
+              </div>
+            )}
+
+            {trace && (
+              <div className="card">
+                <div className="head" style={{ fontWeight: 600, marginBottom: 10 }}>
+                  本次 Trace
+                </div>
+                <div className="trace-grid">
+                  <div className="cell">
+                    <div className="k">LLM 调用</div>
+                    <div className="v">{trace.llm_calls ?? "-"}</div>
+                  </div>
+                  <div className="cell">
+                    <div className="k">工具调用</div>
+                    <div className="v">{trace.tool_calls ?? "-"}</div>
+                  </div>
+                  <div className="cell">
+                    <div className="k">总 Token</div>
+                    <div className="v">{trace.total_tokens ?? "-"}</div>
+                  </div>
+                  <div className="cell">
+                    <div className="k">成本</div>
+                    <div className="v">${(trace.cost_usd ?? 0).toFixed(4)}</div>
+                  </div>
+                </div>
+                {langfuseUrl && (
+                  <p className="muted" style={{ marginTop: 10 }}>
+                    <a href={langfuseUrl} target="_blank" rel="noreferrer">
+                      在 Langfuse 查看完整 trace →
+                    </a>
+                  </p>
+                )}
+              </div>
+            )}
+
+            {!running && steps.length === 0 && !report && !error && (
+              <div className="empty">
+                在下方输入一个科研任务，Agent 会自主检索 / 提交 / 出报告
+              </div>
+            )}
+          </div>
+
+          <div className="card composer">
+            <textarea
+              value={task}
+              onChange={(e) => setTask(e.target.value)}
+              placeholder="例如：复现 Restormer 的 Gaussian Color Blind 在 CBSD68 σ=25 上的结果，并和 model_v3_rgb 对比，出报告"
+            />
+            <div className="row">
+              <button className="btn" onClick={run} disabled={running || !task.trim()}>
+                {running ? (
+                  <>
+                    <span className="spinner" /> 运行中…
+                  </>
+                ) : (
+                  "开始"
+                )}
+              </button>
+              <label>
+                最大步数
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={maxIterations}
+                  onChange={(e) => setMaxIterations(Number(e.target.value) || 10)}
+                  style={{ width: 60, padding: "4px 8px", border: "1px solid var(--border)", borderRadius: 6 }}
+                />
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={langfuse}
+                  onChange={(e) => setLangfuse(e.target.checked)}
+                />
+                Langfuse 追踪
+              </label>
+              <span className="muted">后端 {API_BASE}</span>
+            </div>
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
