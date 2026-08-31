@@ -16,7 +16,8 @@ from typing import Any
 
 from researchops.db.store import ExperimentStore
 from researchops.experiment import run_and_collect
-from researchops.labops import LabClient
+from researchops.labops import LabClient, RemoteLab
+from researchops.mcp.client import LabopsMCPClient, RemoteTool
 from researchops.rag.retriever import Retriever
 
 ToolHandler = Callable[..., Awaitable[str]]
@@ -260,7 +261,7 @@ def make_labops_tools(
 
 
 def make_run_experiment_tool(
-    client: LabClient, store: ExperimentStore, *, approver: Approver | None = None
+    client: RemoteLab, store: ExperimentStore, *, approver: Approver | None = None
 ) -> Tool:
     """One-shot tool wrapping the deterministic submit->poll->parse->persist pipeline.
 
@@ -337,16 +338,87 @@ def make_run_experiment_tool(
     )
 
 
-def build_default_tools(
-    retriever: Retriever,
-    lab_client: LabClient,
+# Destructive tools the MCP adapter must gate the same way the direct path does.
+_DESTRUCTIVE_TOOLS = {"submit_job", "cancel_job"}
+
+
+def _normalize_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Pass an MCP input schema through to OpenAI ``parameters`` (both are JSON Schema).
+
+    The MCP server advertises ``{"type": "object", "properties": ...}``; this just
+    guarantees the top-level ``type`` so a stray schema still parses as an object.
+    """
+    if schema.get("type") == "object":
+        return schema
+    return {
+        "type": "object",
+        "properties": schema.get("properties", {}),
+        **({"required": schema["required"]} if schema.get("required") else {}),
+    }
+
+
+def _make_mcp_tool(
+    mcp: LabopsMCPClient, rt: RemoteTool, *, approver: Approver | None
+) -> Tool:
+    """Wrap one remote-lab MCP tool as an agent ``Tool``, gating destructive ones."""
+
+    async def handler(**arguments: Any) -> str:
+        if rt.name in _DESTRUCTIVE_TOOLS:
+            rejection = await _require_approval(rt.name, approver, arguments)
+            if rejection is not None:
+                return rejection
+        return await mcp.call_tool(rt.name, arguments)
+
+    return Tool(
+        name=rt.name,
+        description=rt.description,
+        parameters=_normalize_schema(rt.input_schema),
+        handler=handler,
+    )
+
+
+async def make_mcp_labops_tools(
+    mcp: LabopsMCPClient,
     *,
     approver: Approver | None = None,
     store: ExperimentStore | None = None,
+) -> list[Tool]:
+    """Load the labops tools from the MCP server (instead of a direct ``LabClient``).
+
+    Enumerates the server's tools and wraps each as an agent ``Tool`` whose handler
+    calls it over MCP. The composite ``run_experiment`` tool is added locally when a
+    ``store`` is supplied (it drives the MCP primitives through ``RemoteLab``).
+    """
+    tools = [_make_mcp_tool(mcp, rt, approver=approver) for rt in await mcp.list_tools()]
+    if store is not None:
+        tools.append(make_run_experiment_tool(mcp, store, approver=approver))
+    return tools
+
+
+async def build_default_tools(
+    retriever: Retriever,
+    labops: LabClient | LabopsMCPClient,
+    *,
+    via_mcp: bool = False,
+    approver: Approver | None = None,
+    store: ExperimentStore | None = None,
 ) -> ToolRegistry:
-    """Wire the full toolset: paper retrieval + remote-lab orchestration."""
+    """Wire the full toolset: paper retrieval + remote-lab orchestration.
+
+    With ``via_mcp``, the remote-lab primitives are loaded over the MCP protocol from a
+    running ``LabopsMCPClient``; otherwise they are built directly from a ``LabClient``
+    (the transport-agnostic fallback, still used by the CLI and unit tests).
+    """
     registry = ToolRegistry()
     registry.register(make_rag_search_tool(retriever))
-    for tool in make_labops_tools(lab_client, approver=approver, store=store):
-        registry.register(tool)
+    if via_mcp:
+        if not isinstance(labops, LabopsMCPClient):
+            raise TypeError("via_mcp=True requires a LabopsMCPClient")
+        for tool in await make_mcp_labops_tools(labops, approver=approver, store=store):
+            registry.register(tool)
+    else:
+        if not isinstance(labops, LabClient):
+            raise TypeError("via_mcp=False requires a LabClient")
+        for tool in make_labops_tools(labops, approver=approver, store=store):
+            registry.register(tool)
     return registry

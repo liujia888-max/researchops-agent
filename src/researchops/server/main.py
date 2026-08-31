@@ -147,14 +147,15 @@ async def agent_stream(req: AgentRunRequest) -> StreamingResponse:
         from researchops.agent.stream import stream_agent
         from researchops.agent.tools import build_default_tools
         from researchops.db.store import ExperimentStore
-        from researchops.labops import LabClient, SshConnection
+        from researchops.mcp.client import LabopsMCPClient
         from researchops.observability.langfuse import build_client, export_trace, is_configured
         from researchops.observability.trace import Trace, TracedLLM, TracedToolRegistry
         from researchops.rag.retriever import Retriever
 
         llm = build_llm(settings)
         retriever = Retriever()
-        lab_client = LabClient(SshConnection())
+        labops = LabopsMCPClient(settings)
+        await labops.start()
         store = ExperimentStore()
 
         # The agent stream and the approval events share one queue: a producer task
@@ -184,7 +185,9 @@ async def agent_stream(req: AgentRunRequest) -> StreamingResponse:
             finally:
                 _PENDING_APPROVALS.pop(request_id, None)
 
-        registry = build_default_tools(retriever, lab_client, store=store, approver=approve)
+        registry = await build_default_tools(
+            retriever, labops, via_mcp=True, store=store, approver=approve
+        )
         trace = Trace(task=req.task)
         traced_llm: BaseLLM = TracedLLM(llm, trace)
         traced_registry = TracedToolRegistry(registry, trace)
@@ -230,7 +233,7 @@ async def agent_stream(req: AgentRunRequest) -> StreamingResponse:
             except (asyncio.CancelledError, Exception):  # noqa: BLE001 — swallow producer teardown
                 pass
             await retriever.close()
-            await lab_client.close()
+            await labops.close()
             await store.close()
 
     return StreamingResponse(events(), media_type="text/event-stream")

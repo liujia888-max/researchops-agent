@@ -33,9 +33,17 @@ async def stream_agent(
     llm: BaseLLM,
     registry: ToolRegistry,
     max_iterations: int = 10,
+    max_retries: int = 2,
+    retry_backoff_s: float = 1.0,
 ) -> AsyncIterator[dict[str, Any]]:
     """Run the agent, yielding one event per graph node transition."""
-    app = build_agent(llm, registry, max_iterations=max_iterations)
+    app = build_agent(
+        llm,
+        registry,
+        max_iterations=max_iterations,
+        max_retries=max_retries,
+        retry_backoff_s=retry_backoff_s,
+    )
     initial = AgentState(task=task, max_iterations=max_iterations)
 
     async for chunk in app.astream(initial, stream_mode="updates"):

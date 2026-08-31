@@ -105,7 +105,9 @@ async def _agent(
     lab_client = LabClient(SshConnection())
     store = ExperimentStore()
     approver = _interactive_approver if interactive_approval else None
-    registry = build_default_tools(retriever, lab_client, approver=approver, store=store)
+    registry = await build_default_tools(
+        retriever, lab_client, approver=approver, store=store
+    )
     run_trace = None
     use_trace = trace or langfuse
     try:

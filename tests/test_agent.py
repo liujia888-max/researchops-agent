@@ -158,12 +158,11 @@ async def test_run_agent_single_tool_call_end_to_end() -> None:
 
 async def test_run_agent_stops_at_max_iterations() -> None:
     registry = ToolRegistry([_make_tool("t", "evidence")])
-    tool_call = _tool_call("t", {})
     llm = FakeLLM(
         [
             ChatResponse(content="- step one\n", model="fake"),  # planner
-            tool_call,  # executor iter 0
-            tool_call,  # executor iter 1
+            _tool_call("t", {"n": 1}),  # executor iter 0
+            _tool_call("t", {"n": 2}),  # executor iter 1
             ChatResponse(content="report body", model="fake"),  # reporter
         ]
     )
@@ -174,6 +173,81 @@ async def test_run_agent_stops_at_max_iterations() -> None:
     assert len(state.tool_results) == 2
     assert state.finished is True
     assert state.final_report == "report body"
+
+
+async def test_run_agent_repetition_guard_stops_repeated_call() -> None:
+    """A second identical (tool, arguments) call is refused instead of looping."""
+    calls: list[dict[str, Any]] = []
+
+    async def handler(**kwargs: Any) -> str:
+        calls.append(kwargs)
+        return "evidence"
+
+    registry = ToolRegistry(
+        [
+            Tool(
+                name="t",
+                description="d",
+                parameters={"type": "object", "properties": {}, "required": []},
+                handler=handler,
+            )
+        ]
+    )
+    repeated = _tool_call("t", {"q": "same"})
+    llm = FakeLLM(
+        [
+            ChatResponse(content="- step\n", model="fake"),  # planner
+            repeated,  # executor: first call
+            repeated,  # executor: proposes the same call again -> guard stops
+            ChatResponse(content="final", model="fake"),  # reporter
+        ]
+    )
+
+    state = await run_agent("task", llm=llm, registry=registry, max_iterations=10)
+
+    assert len(calls) == 1  # the handler ran exactly once
+    assert len(state.tool_results) == 1
+    assert state.finished is True
+    assert state.final_report == "final"
+    assert any("repetition guard" in m.content for m in state.messages)
+
+
+async def test_run_agent_retries_failing_tool() -> None:
+    """A primitive tool that raises a couple of times is retried before giving up."""
+    attempts: list[int] = []
+
+    async def flaky(**kwargs: Any) -> str:
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise RuntimeError("connection reset")
+        return "recovered"
+
+    registry = ToolRegistry(
+        [
+            Tool(
+                name="t",
+                description="d",
+                parameters={"type": "object", "properties": {}, "required": []},
+                handler=flaky,
+            )
+        ]
+    )
+    llm = FakeLLM(
+        [
+            ChatResponse(content="- step\n", model="fake"),  # planner
+            _tool_call("t", {}),  # executor
+            ChatResponse(content="done", model="fake"),  # executor: finish
+            ChatResponse(content="final", model="fake"),  # reporter
+        ]
+    )
+
+    state = await run_agent(
+        "task", llm=llm, registry=registry, max_iterations=5, retry_backoff_s=0.0
+    )
+
+    # max_retries defaults to 2 -> 1 initial + 2 retries = 3 attempts, success on the 3rd.
+    assert len(attempts) == 3
+    assert state.tool_results[-1].output == "recovered"
 
 
 async def test_run_agent_echoes_single_tool_call_for_parallel_calls() -> None:

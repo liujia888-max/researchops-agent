@@ -16,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from researchops.db.store import ExperimentStore
-from researchops.labops import LabClient
+from researchops.labops import RemoteLab
 from researchops.labops.errors import CommandFailedError
 
 
@@ -81,7 +81,7 @@ def parse_metrics(log: str) -> list[MetricValue]:
 
 
 async def run_and_collect(
-    client: LabClient,
+    client: RemoteLab,
     store: ExperimentStore,
     *,
     experiment_name: str,

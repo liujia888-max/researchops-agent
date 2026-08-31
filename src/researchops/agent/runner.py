@@ -14,9 +14,17 @@ async def run_agent(
     llm: BaseLLM,
     registry: ToolRegistry,
     max_iterations: int = 10,
+    max_retries: int = 2,
+    retry_backoff_s: float = 1.0,
 ) -> AgentState:
     """Run the agent on a task and return the final state (incl. ``final_report``)."""
-    app = build_agent(llm, registry, max_iterations=max_iterations)
+    app = build_agent(
+        llm,
+        registry,
+        max_iterations=max_iterations,
+        max_retries=max_retries,
+        retry_backoff_s=retry_backoff_s,
+    )
     result = await app.ainvoke(AgentState(task=task, max_iterations=max_iterations))
     if isinstance(result, AgentState):
         return result

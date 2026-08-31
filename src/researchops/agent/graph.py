@@ -15,6 +15,8 @@ entrypoint.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import re
 from typing import Any
 
@@ -49,6 +51,24 @@ evidence. Use markdown headings and finish with a short "Conclusion"."""
 
 _BULLET = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s*")
 
+# ``ToolRegistry.execute`` prefixes a raised exception with this string; retry logic
+# keys off it so approval rejections (which start with "REJECTED:") are never retried.
+_ERROR_PREFIX = "error in tool "
+
+# ``run_experiment`` polls to completion internally; blindly re-running it on a late
+# failure would re-submit the job, so it is excluded from the failure-retry path.
+_NO_RETRY_TOOLS = {"run_experiment"}
+
+
+def _tool_signature(name: str, arguments: dict[str, Any]) -> str:
+    """Canonical identity of a tool call, so identical repeats can be detected."""
+    return f"{name}:{json.dumps(arguments, sort_keys=True, default=str)}"
+
+
+def _past_signatures(state: AgentState) -> set[str]:
+    """Every ``(tool, arguments)`` pair already executed this run."""
+    return {_tool_signature(r.tool, r.arguments) for r in state.tool_results}
+
 
 def _parse_plan(content: str) -> list[str]:
     steps: list[str] = []
@@ -74,8 +94,14 @@ def build_agent(
     registry: ToolRegistry,
     *,
     max_iterations: int = 10,
+    max_retries: int = 2,
+    retry_backoff_s: float = 1.0,
 ) -> Any:
-    """Compile the agent graph against an injected LLM and tool registry."""
+    """Compile the agent graph against an injected LLM and tool registry.
+
+    ``max_retries`` bounds how many times a *failing* primitive tool call is re-attempted
+    (with ``retry_backoff_s`` between attempts) before its error is accepted as evidence.
+    """
 
     async def planner(state: AgentState) -> dict[str, Any]:
         resp = await llm.chat(
@@ -115,6 +141,21 @@ def build_agent(
 
         if resp.tool_calls:
             call = resp.tool_calls[0]
+            if _tool_signature(call.name, call.arguments) in _past_signatures(state):
+                # No-progress detection: an exact repeat would gather nothing new and
+                # could otherwise loop until the iteration budget ran out. Stop instead.
+                msg = AgentMessage(
+                    role="assistant",
+                    content=(
+                        f"(repetition guard: {call.name} with these exact arguments was "
+                        "already executed, so it would gather no new evidence; stopping)"
+                    ),
+                )
+                return {
+                    "messages": state.messages + [msg],
+                    "pending_tool": None,
+                    "finished": True,
+                }
             # Echo back exactly the one tool_call we are about to execute, so the next
             # turn pairs one assistant tool_call with one tool message. OpenAI-compatible
             # APIs reject an assistant tool_calls message that has more ids than following
@@ -141,6 +182,16 @@ def build_agent(
         name = pending["name"]
         arguments = pending["arguments"]
         output = await registry.execute(name, arguments)
+
+        # Failure retry: a primitive tool that raised (vs. was rejected/denied) gets a
+        # few backoff-limited re-attempts so a transient SSH/embedding hiccup doesn't end
+        # the run. ``run_experiment`` is exempt (re-running it re-submits the job).
+        if name not in _NO_RETRY_TOOLS:
+            for _ in range(max_retries):
+                if not output.startswith(_ERROR_PREFIX):
+                    break
+                await asyncio.sleep(retry_backoff_s)
+                output = await registry.execute(name, arguments)
 
         call_id = ""
         if state.messages and state.messages[-1].tool_calls:
