@@ -19,12 +19,19 @@ type TraceSummary = {
   cost_usd?: number;
 };
 
+type Metric = {
+  name: string;
+  value: number | string;
+  dataset?: string;
+  sigma?: number | string;
+};
+
 type Experiment = {
   id: number;
   name: string;
   runs: {
     status: string;
-    metrics: Record<string, number>;
+    metrics: Metric[];
   }[];
 };
 
@@ -365,11 +372,13 @@ export default function Home() {
                   <span className={`badge ${run.status === "success" ? "ok" : "other"}`}>
                     {run.status}
                   </span>
-                  {Object.keys(run.metrics).length > 0 && (
+                  {run.metrics.length > 0 && (
                     <div className="metrics">
-                      {Object.entries(run.metrics).map(([k, v]) => (
-                        <span className="m" key={k}>
-                          {k}: {v}
+                      {run.metrics.map((m, i) => (
+                        <span className="m" key={i}>
+                          {m.name}
+                          {m.sigma != null ? ` σ${m.sigma}` : ""}:{" "}
+                          {typeof m.value === "number" ? m.value.toFixed(3) : m.value}
                         </span>
                       ))}
                     </div>
