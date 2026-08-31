@@ -49,6 +49,11 @@ eval = [
     "langchain-openai>=0.2.0",
     "langchain-core>=0.3.0",
 ]
+# Observability: Langfuse cloud export (token/cost/latency dashboards). Pulls in the
+# OpenTelemetry SDK, so it stays optional rather than weighing down the core runtime.
+observability = [
+    "langfuse>=4.0",
+]
 
 [project.scripts]
 researchops = "researchops.cli:main"

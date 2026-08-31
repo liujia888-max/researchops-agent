@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     # (e.g. postgresql+asyncpg://user:pass@host/db) for production — no code change.
     db_url: str = "sqlite+aiosqlite:///.researchops/experiments.db"
 
+    # Phase 3 — observability: Langfuse (cloud) trace/cost/latency dashboards.
+    # Empty keys => exporter disabled (the local `--trace` summary still works).
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_base_url: str = "https://cloud.langfuse.com"
+
 
 @lru_cache
 def get_settings() -> Settings:

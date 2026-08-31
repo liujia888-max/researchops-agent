@@ -40,6 +40,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="print a token/cost/latency trace summary after the run",
     )
+    p.add_argument(
+        "--langfuse",
+        action="store_true",
+        help="export the run to Langfuse (cloud) and print the trace URL; implies --trace",
+    )
     return parser
 
 
@@ -81,7 +86,11 @@ def _interactive_approver(tool_name: str, arguments: dict[str, Any]) -> bool:
 
 
 async def _agent(
-    task: str, max_iterations: int, interactive_approval: bool = False, trace: bool = False
+    task: str,
+    max_iterations: int,
+    interactive_approval: bool = False,
+    trace: bool = False,
+    langfuse: bool = False,
 ) -> None:
     from pathlib import Path
 
@@ -97,10 +106,12 @@ async def _agent(
     store = ExperimentStore()
     approver = _interactive_approver if interactive_approval else None
     registry = build_default_tools(retriever, lab_client, approver=approver, store=store)
+    run_trace = None
+    use_trace = trace or langfuse
     try:
         Path(".researchops").mkdir(exist_ok=True)  # noqa: ASYNC240  # one-time startup, not hot-path I/O
         await store.init()
-        if trace:
+        if use_trace:
             from researchops.observability.trace import traced_run_agent
 
             state, run_trace = await traced_run_agent(
@@ -113,11 +124,29 @@ async def _agent(
         await lab_client.close()
         await store.close()
     print(state.final_report)
-    if trace:
+    if trace and run_trace is not None:
         import json
 
         print("\n[trace]")
         print(json.dumps(run_trace.summary(), ensure_ascii=False, indent=2, default=str))
+    if langfuse and run_trace is not None:
+        from researchops.config import get_settings
+        from researchops.observability.langfuse import build_client, export_trace, is_configured
+
+        settings = get_settings()
+        if not is_configured(settings):
+            print(
+                "\n[langfuse] skipped: LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY "
+                "not set in .env"
+            )
+            return
+        lf = build_client(settings)
+        try:
+            url = export_trace(run_trace, lf=lf)
+            lf.flush()
+            print(f"\n[langfuse] {url}")
+        finally:
+            lf.shutdown()
 
 
 def main() -> None:
@@ -133,7 +162,15 @@ def main() -> None:
 
         mcp.run()
     elif args.command == "agent":
-        asyncio.run(_agent(args.task, args.max_iterations, args.interactive_approval, args.trace))
+        asyncio.run(
+            _agent(
+                args.task,
+                args.max_iterations,
+                args.interactive_approval,
+                args.trace,
+                args.langfuse,
+            )
+        )
     else:
         raise SystemExit(f"unknown command: {args.command}")
 

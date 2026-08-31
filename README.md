@@ -16,7 +16,7 @@
 
 - **RAG**：论文 PDF → 结构感知分块 → bge-m3 双向量(dense+sparse) → Qdrant 混合检索 + RRF → bge-reranker-v2-m3 重排 → 带引用生成
 - **Agent**：LangGraph 状态机（Plan → Retrieve → Execute → Monitor → Report）+ human-in-the-loop 审批 + 长短期记忆
-- **工程化**：FastAPI + SSE 流式、Docker Compose、可观测（自研 trace：token/成本/延迟）、RAGAS/golden-set 评测、自研 MCP Server `labops`
+- **工程化**：FastAPI + SSE 流式、Docker Compose、可观测（自研 trace + Langfuse 云面板：token/成本/延迟）、RAGAS/golden-set 评测、自研 MCP Server `labops`
 
 ## 快速开始
 

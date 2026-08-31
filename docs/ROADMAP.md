@@ -28,7 +28,7 @@
 
 ## Phase 3 — 可观测 + 评测 + 交付
 
-- [x] 可观测：轻量 trace（token/cost/latency，`researchops agent --trace`）——自研、无外部依赖；Langfuse 适配器留待后续（需 Docker/云 key）
+- [x] 可观测：轻量 trace（token/cost/latency，`researchops agent --trace`）+ Langfuse 云导出（`--langfuse`，token/成本/延迟面板，trace 上云）
 - [x] Agent 轨迹评测（工具召回/精确率、完成率、答案正确率、平均步数/token/成本/延迟，`scripts/eval_agent.py` + `golden_set/`）
 - [ ] Next.js 前端（SSE 流式 + 实验对比报告）
 - [ ] vLLM 私有化演示 + 成本对比
