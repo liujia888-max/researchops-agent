@@ -269,3 +269,16 @@ async def documents() -> list[dict[str, Any]]:
         return await store.list_documents()
     finally:
         await store.close()
+
+
+@app.delete("/documents/{doc_id}")
+async def delete_document(doc_id: str) -> dict[str, Any]:
+    """Delete a document (all its chunks) from the RAG store."""
+    from researchops.rag.qdrant_store import QdrantStore
+
+    store = QdrantStore()
+    try:
+        removed = await store.delete_document(doc_id)
+    finally:
+        await store.close()
+    return {"deleted": doc_id, "chunks": removed}

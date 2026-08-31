@@ -111,5 +111,18 @@ class QdrantStore:
             for doc_id, n in sorted(counts.items())
         ]
 
+    async def delete_document(self, doc_id: str) -> int:
+        """Delete every chunk belonging to ``doc_id``; return the count removed."""
+        await self.ensure_collection()
+        flt = models.Filter(
+            must=[models.FieldCondition(key="doc_id", match=models.MatchValue(value=doc_id))]
+        )
+        count = await self._client.count(collection_name=self.collection, count_filter=flt)
+        await self._client.delete(
+            collection_name=self.collection,
+            points_selector=models.FilterSelector(filter=flt),
+        )
+        return int(count.count)
+
     async def close(self) -> None:
         await self._client.close()

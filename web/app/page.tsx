@@ -206,6 +206,17 @@ export default function Home() {
     refreshDocuments();
   }
 
+  async function deleteDocument(docId: string) {
+    try {
+      const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(docId)}`, {
+        method: "DELETE",
+      });
+      if (res.ok) refreshDocuments();
+    } catch {
+      // keep last list on failure
+    }
+  }
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [steps, report]);
@@ -469,9 +480,27 @@ export default function Home() {
         ) : (
           <div style={{ marginTop: 10 }}>
             {documents.map((d) => (
-              <div key={d.doc_id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+              <div
+                key={d.doc_id}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "6px 0",
+                  borderBottom: "1px solid var(--border)",
+                }}
+              >
                 <span>{d.doc_id}</span>
-                <span className="muted">{d.chunks} chunks</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <span className="muted">{d.chunks} chunks</span>
+                  <button
+                    className="btn secondary"
+                    style={{ padding: "2px 10px", fontSize: 12 }}
+                    onClick={() => deleteDocument(d.doc_id)}
+                  >
+                    删除
+                  </button>
+                </span>
               </div>
             ))}
           </div>

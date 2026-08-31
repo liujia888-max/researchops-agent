@@ -62,6 +62,9 @@ class _FakeQdrantStore:
     async def upsert(self, chunks) -> None:
         return None
 
+    async def delete_document(self, doc_id: str) -> int:
+        return 7
+
     async def close(self) -> None:
         return None
 
@@ -97,3 +100,13 @@ def test_upload_document_rejects_unsupported(tmp_path, monkeypatch) -> None:
         files={"file": ("legacy.doc", b"not a docx", "application/msword")},
     )
     assert resp.status_code == 400
+
+
+def test_delete_document(monkeypatch) -> None:
+    import researchops.rag.qdrant_store as qs
+
+    monkeypatch.setattr(qs, "QdrantStore", _FakeQdrantStore)
+    client = TestClient(app)
+    resp = client.delete("/documents/notes")
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": "notes", "chunks": 7}
