@@ -17,6 +17,7 @@ from typing import Any
 from researchops.db.store import ExperimentStore
 from researchops.experiment import run_and_collect
 from researchops.labops import LabClient, RemoteLab
+from researchops.labops.policy import validate_command
 from researchops.mcp.client import LabopsMCPClient, RemoteTool
 from researchops.memory import MemoryStore
 from researchops.rag.retriever import Retriever
@@ -107,6 +108,24 @@ async def _require_approval(
     return None
 
 
+def _check_command_policy(command: str) -> str | None:
+    """Reject a dangerous command with a non-retry message (mirrors ``_require_approval``).
+
+    ``submit_job``/``run_experiment`` run arbitrary shell by design; the command policy
+    rejects the obviously destructive ones *before* approval, so a bad proposal never
+    reaches the host and the LLM is not tempted to retry it.
+    """
+    violation = validate_command(command)
+    if violation is not None:
+        return (
+            f"REJECTED: {violation}. The command was NOT executed. Rewrite the command "
+            "to operate inside the working directory, or use a read-only tool "
+            "(rag_search, list_experiments, gpu_info, job_status, tail_log, "
+            "fetch_metrics) to answer instead."
+        )
+    return None
+
+
 def make_rag_search_tool(retriever: Retriever) -> Tool:
     """Retrieve cited chunks from the paper library."""
 
@@ -193,6 +212,9 @@ def make_labops_tools(
         return _dump([e.model_dump() for e in await client.list_experiments()])
 
     async def submit_job(job_id: str, command: str) -> str:
+        policy_rejection = _check_command_policy(command)
+        if policy_rejection is not None:
+            return policy_rejection
         rejection = await _require_approval(
             "submit_job", approver, {"job_id": job_id, "command": command}
         )
@@ -313,6 +335,9 @@ def make_run_experiment_tool(
     async def run_experiment(
         experiment_name: str, job_id: str, command: str, task: str = ""
     ) -> str:
+        policy_rejection = _check_command_policy(command)
+        if policy_rejection is not None:
+            return policy_rejection
         rejection = await _require_approval(
             "run_experiment",
             approver,
@@ -413,6 +438,10 @@ def _make_mcp_tool(
 
     async def handler(**arguments: Any) -> str:
         if rt.name in _DESTRUCTIVE_TOOLS:
+            if rt.name == "submit_job":
+                policy_rejection = _check_command_policy(str(arguments.get("command", "")))
+                if policy_rejection is not None:
+                    return policy_rejection
             rejection = await _require_approval(rt.name, approver, arguments)
             if rejection is not None:
                 return rejection

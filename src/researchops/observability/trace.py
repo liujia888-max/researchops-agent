@@ -19,19 +19,37 @@ drop-in ``BaseLLM``: it forwards every call untouched and only observes.
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
 from researchops.agent.graph import PLANNER_PROMPT, REPORTER_PROMPT, SYSTEM_PROMPT
-from researchops.agent.runner import run_agent
+from researchops.agent.multi import (
+    LABOPS_PROMPT,
+    MULTI_REPORTER_PROMPT,
+    RESEARCHER_PROMPT,
+    SUPERVISOR_PROMPT,
+    MultiAgentState,
+)
+from researchops.agent.runner import run_agent, run_multi_agent
 from researchops.agent.state import AgentState
 from researchops.agent.tools import Tool, ToolRegistry
+from researchops.config import get_settings
 from researchops.llm.providers import BaseLLM, ChatMessage, ChatResponse
 
-# DeepSeek-chat list prices (USD per 1M tokens). Verify against the provider before
-# quoting exact dollar figures — the structure (tokens x price) is what matters here.
-_DEFAULT_INPUT_PER_1M = 0.27
-_DEFAULT_OUTPUT_PER_1M = 1.10
+
+def llm_prices() -> tuple[float, float]:
+    """Current ``(input, output)`` USD per 1M tokens, from settings.
+
+    Centralized so the trace summary and the Langfuse exporter quote the same,
+    configurable price (rather than a hardcoded stale one).
+    """
+    settings = get_settings()
+    return settings.llm_input_price_per_1m, settings.llm_output_price_per_1m
+
+
+class BudgetExceededError(RuntimeError):
+    """The run's estimated cost exceeded its configured budget cap."""
 
 
 @dataclass(frozen=True)
@@ -58,6 +76,7 @@ class Trace:
     """Accumulates the spans of one agent run and reduces them to headline numbers."""
 
     task: str = ""
+    budget_usd: float = 0.0  # hard cap on estimated cost (0 = unlimited)
     llm_spans: list[LlmSpan] = field(default_factory=list)
     tool_spans: list[ToolSpan] = field(default_factory=list)
     _started: float = field(default_factory=time.perf_counter, repr=False)
@@ -87,11 +106,29 @@ class Trace:
     def estimated_cost_usd(
         self,
         *,
-        input_per_1m: float = _DEFAULT_INPUT_PER_1M,
-        output_per_1m: float = _DEFAULT_OUTPUT_PER_1M,
+        input_per_1m: float | None = None,
+        output_per_1m: float | None = None,
     ) -> float:
-        """USD estimate from token counts; prices are per 1M tokens."""
-        return (self.input_tokens * input_per_1m + self.output_tokens * output_per_1m) / 1_000_000
+        """USD estimate from token counts; prices are per 1M tokens.
+
+        Defaults to the configured provider prices (``llm_prices()``); pass explicit
+        values to override (used by tests and cross-provider comparisons).
+        """
+        default_input, default_output = llm_prices()
+        in_price = default_input if input_per_1m is None else input_per_1m
+        out_price = default_output if output_per_1m is None else output_per_1m
+        return (self.input_tokens * in_price + self.output_tokens * out_price) / 1_000_000
+
+    def check_budget(self) -> None:
+        """Raise ``BudgetExceededError`` once the estimated cost passes the cap.
+
+        ``budget_usd <= 0`` means unlimited (the default for local/CI runs).
+        """
+        if self.budget_usd > 0 and self.estimated_cost_usd() > self.budget_usd:
+            raise BudgetExceededError(
+                f"cost budget exceeded: estimated {self.estimated_cost_usd():.6f} USD "
+                f"> budget {self.budget_usd} USD"
+            )
 
     def summary(self) -> dict[str, Any]:
         """Reduce to a JSON-friendly summary (headline numbers + per-node breakdown)."""
@@ -129,8 +166,14 @@ def _infer_node(messages: list[ChatMessage]) -> str:
         return "executor"
     if first == PLANNER_PROMPT:
         return "planner"
-    if first == REPORTER_PROMPT:
+    if first == REPORTER_PROMPT or first == MULTI_REPORTER_PROMPT:
         return "reporter"
+    if first == SUPERVISOR_PROMPT:
+        return "supervisor"
+    if first == RESEARCHER_PROMPT:
+        return "researcher"
+    if first == LABOPS_PROMPT:
+        return "labops"
     return "llm"
 
 
@@ -156,6 +199,7 @@ class TracedLLM(BaseLLM):
         tool_choice: str = "auto",
     ) -> ChatResponse:
         node = _infer_node(messages)
+        self._trace.check_budget()
         start = time.perf_counter()
         resp = await self._inner.chat(
             messages,
@@ -173,6 +217,7 @@ class TracedLLM(BaseLLM):
                 latency_s=time.perf_counter() - start,
             )
         )
+        self._trace.check_budget()
         return resp
 
 
@@ -196,6 +241,10 @@ class TracedToolRegistry(ToolRegistry):
     def schemas(self) -> list[dict[str, Any]]:
         return self._inner.schemas()
 
+    def subset(self, names: Iterable[str]) -> ToolRegistry:
+        """A traced subset — the multi-agent specialists' tool surface, still traced."""
+        return TracedToolRegistry(self._inner.subset(names), self._trace)
+
     async def execute(self, name: str, arguments: dict[str, Any]) -> str:
         start = time.perf_counter()
         try:
@@ -204,18 +253,49 @@ class TracedToolRegistry(ToolRegistry):
             self._trace.record_tool(ToolSpan(name=name, latency_s=time.perf_counter() - start))
 
 
+def _resolve_budget(max_cost_usd: float | None) -> float:
+    """Resolve the run budget: an explicit value, else the configured cap (0=unlimited)."""
+    return get_settings().agent_max_cost_usd if max_cost_usd is None else max_cost_usd
+
+
 async def traced_run_agent(
     task: str,
     *,
     llm: BaseLLM,
     registry: ToolRegistry,
     max_iterations: int = 10,
+    max_cost_usd: float | None = None,
 ) -> tuple[AgentState, Trace]:
     """Run the agent with full tracing; return the final state and its trace."""
-    trace = Trace(task=task)
+    trace = Trace(task=task, budget_usd=_resolve_budget(max_cost_usd))
     traced_llm: BaseLLM = TracedLLM(llm, trace)
     traced_registry: ToolRegistry = TracedToolRegistry(registry, trace)
     state = await run_agent(
         task, llm=traced_llm, registry=traced_registry, max_iterations=max_iterations
+    )
+    return state, trace
+
+
+async def traced_run_multi_agent(
+    task: str,
+    *,
+    llm: BaseLLM,
+    registry: ToolRegistry,
+    max_iterations: int = 10,
+    max_retries: int = 2,
+    retry_backoff_s: float = 1.0,
+    max_cost_usd: float | None = None,
+) -> tuple[MultiAgentState, Trace]:
+    """Run the multi-agent team with full tracing; return the final state and trace."""
+    trace = Trace(task=task, budget_usd=_resolve_budget(max_cost_usd))
+    traced_llm: BaseLLM = TracedLLM(llm, trace)
+    traced_registry: ToolRegistry = TracedToolRegistry(registry, trace)
+    state = await run_multi_agent(
+        task,
+        llm=traced_llm,
+        registry=traced_registry,
+        max_iterations=max_iterations,
+        max_retries=max_retries,
+        retry_backoff_s=retry_backoff_s,
     )
     return state, trace

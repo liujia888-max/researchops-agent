@@ -122,9 +122,16 @@ async def _agent(
         Path(".researchops").mkdir(exist_ok=True)  # noqa: ASYNC240  # one-time startup, not hot-path I/O
         await store.init()
         if multi:
-            multi_state = await run_multi_agent(
-                task, llm=llm, registry=registry, max_iterations=max_iterations
-            )
+            if trace or langfuse:
+                from researchops.observability.trace import traced_run_multi_agent
+
+                multi_state, run_trace = await traced_run_multi_agent(
+                    task, llm=llm, registry=registry, max_iterations=max_iterations
+                )
+            else:
+                multi_state = await run_multi_agent(
+                    task, llm=llm, registry=registry, max_iterations=max_iterations
+                )
             final_report = multi_state.final_report
         elif trace or langfuse:
             from researchops.observability.trace import traced_run_agent

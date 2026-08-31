@@ -190,7 +190,7 @@ async def agent_stream(req: AgentRunRequest) -> StreamingResponse:
         registry = await build_default_tools(
             retriever, labops, via_mcp=True, store=store, approver=approve, memory=memory
         )
-        trace = Trace(task=req.task)
+        trace = Trace(task=req.task, budget_usd=settings.agent_max_cost_usd)
         traced_llm: BaseLLM = TracedLLM(llm, trace)
         traced_registry = TracedToolRegistry(registry, trace)
 

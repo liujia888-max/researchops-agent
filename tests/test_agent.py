@@ -358,6 +358,18 @@ async def test_async_approver_is_awaited() -> None:
     assert client.submitted == [("x", "echo hi")]
 
 
+async def test_submit_job_rejects_dangerous_command_even_with_approver() -> None:
+    """The command policy blocks a dangerous command before approval is even asked."""
+    client = _FakeLabClient()
+    tools = _tools_by_name(client, approver=lambda name, args: True)
+
+    out = await tools["submit_job"].handler(job_id="x", command="rm -rf /")
+
+    assert out.startswith("REJECTED")
+    assert "policy" in out
+    assert client.submitted == []
+
+
 # --------------------------------------------------------------------------- #
 # run_experiment (deterministic submit->poll->persist tool)
 # --------------------------------------------------------------------------- #

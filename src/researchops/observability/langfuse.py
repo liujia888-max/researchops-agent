@@ -21,11 +21,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from researchops.observability.trace import (
-    _DEFAULT_INPUT_PER_1M,
-    _DEFAULT_OUTPUT_PER_1M,
-    Trace,
-)
+from researchops.observability.trace import Trace, llm_prices
 
 if TYPE_CHECKING:
     from langfuse import Langfuse
@@ -52,8 +48,9 @@ def build_client(settings: Settings) -> Langfuse:
 
 
 def _span_cost_usd(input_tokens: int, output_tokens: int) -> dict[str, float]:
-    input_usd = input_tokens * _DEFAULT_INPUT_PER_1M / 1_000_000
-    output_usd = output_tokens * _DEFAULT_OUTPUT_PER_1M / 1_000_000
+    input_price, output_price = llm_prices()
+    input_usd = input_tokens * input_price / 1_000_000
+    output_usd = output_tokens * output_price / 1_000_000
     return {"input": input_usd, "output": output_usd, "total": input_usd + output_usd}
 
 

@@ -27,3 +27,7 @@ class JobNotFoundError(LabopsError):
 
 class InvalidJobIdError(LabopsError):
     """A job id failed the ``[A-Za-z0-9_-]`` allowlist (path-traversal guard)."""
+
+
+class CommandPolicyError(LabopsError):
+    """The command was rejected by the submit_job command policy (dangerous shell)."""

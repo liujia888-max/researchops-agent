@@ -44,7 +44,7 @@ LABOPS_TOOLS = [
     "run_experiment",
 ]
 
-_SUPERVISOR_PROMPT = """You are the supervisor of a small multi-agent research team. Given the task, decide which specialists to run and write a one-line brief for each.
+SUPERVISOR_PROMPT = """You are the supervisor of a small multi-agent research team. Given the task, decide which specialists to run and write a one-line brief for each.
 
 Specialists:
 - researcher: searches the paper library (rag_search) and long-term memory (memory_search); produces cited findings about methods and results.
@@ -52,11 +52,11 @@ Specialists:
 
 Return ONLY a JSON object with keys "specialists" (array, a subset of ["researcher","labops"]) and "briefs" (object mapping specialist name to a one-line brief). No other text."""
 
-_RESEARCHER_PROMPT = """You are a research librarian. Gather evidence with rag_search (paper library) and memory_search (past experiments/notes), then stop once you have enough and summarize the key facts, citing chunks by their [n] number exactly as returned."""
+RESEARCHER_PROMPT = """You are a research librarian. Gather evidence with rag_search (paper library) and memory_search (past experiments/notes), then stop once you have enough and summarize the key facts, citing chunks by their [n] number exactly as returned."""
 
-_LABOPS_PROMPT = """You are a lab operations specialist. Inspect the remote GPU host with read-only tools (gpu_info, list_experiments, job_status, tail_log, fetch_metrics). Only call submit_job/cancel_job/run_experiment when the task explicitly asks to run a job. Summarize the host and job state you observed."""
+LABOPS_PROMPT = """You are a lab operations specialist. Inspect the remote GPU host with read-only tools (gpu_info, list_experiments, job_status, tail_log, fetch_metrics). Only call submit_job/cancel_job/run_experiment when the task explicitly asks to run a job. Summarize the host and job state you observed."""
 
-_REPORTER_PROMPT = """You are writing a research report from a team's findings. Synthesize the specialists' evidence into a concise, well-structured report that directly answers the task. Cite evidence with [1][2]... matching the numbering in rag_search results. Do not invent numbers absent from the evidence. Use markdown headings and finish with a short "Conclusion"."""
+MULTI_REPORTER_PROMPT = """You are writing a research report from a team's findings. Synthesize the specialists' evidence into a concise, well-structured report that directly answers the task. Cite evidence with [1][2]... matching the numbering in rag_search results. Do not invent numbers absent from the evidence. Use markdown headings and finish with a short "Conclusion"."""
 
 _ERROR_PREFIX = "error in tool "
 _NO_RETRY_TOOLS = {"run_experiment"}
@@ -197,14 +197,14 @@ def build_multi_agent(
     """Compile the supervisor -> (researcher | labops) -> reporter graph."""
 
     specialist_configs = {
-        "researcher": (_RESEARCHER_PROMPT, RESEARCHER_TOOLS),
-        "labops": (_LABOPS_PROMPT, LABOPS_TOOLS),
+        "researcher": (RESEARCHER_PROMPT, RESEARCHER_TOOLS),
+        "labops": (LABOPS_PROMPT, LABOPS_TOOLS),
     }
 
     async def supervisor(state: MultiAgentState) -> dict[str, Any]:
         resp = await llm.chat(
             [
-                ChatMessage(role="system", content=_SUPERVISOR_PROMPT),
+                ChatMessage(role="system", content=SUPERVISOR_PROMPT),
                 ChatMessage(role="user", content=state.task),
             ],
             temperature=0.0,
@@ -245,7 +245,7 @@ def build_multi_agent(
         evidence = "\n\n".join(sections) or "(no evidence was gathered)"
         resp = await llm.chat(
             [
-                ChatMessage(role="system", content=_REPORTER_PROMPT),
+                ChatMessage(role="system", content=MULTI_REPORTER_PROMPT),
                 ChatMessage(role="user", content=f"Task: {state.task}\n\nEvidence:\n{evidence}"),
             ],
             temperature=0.2,

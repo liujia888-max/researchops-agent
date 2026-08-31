@@ -12,8 +12,9 @@ Security model
 - ``submit_job`` *is* arbitrary remote execution by design (that is what a training job
   is). It is meant to sit behind human-in-the-loop at the *agent* layer, not here — this
   layer only narrows the blast radius: every job runs ``cd <workdir>`` first, stdout/stderr
-  are captured to a log, and the whole thing is a detached ``screen`` session the agent
-  can poll and cancel.
+  are captured to a log, the whole thing is a detached ``screen`` session the agent can
+  poll and cancel, and the command is screened by the command policy
+  (:mod:`researchops.labops.policy`) before it ever reaches the host.
 - Read-only tools (``gpu_info``, ``list_experiments``, ``job_status``, ``tail_log``,
   ``fetch_metrics``) never execute user strings.
 """
@@ -28,7 +29,8 @@ import shlex
 from dataclasses import dataclass
 
 from researchops.config import Settings
-from researchops.labops.errors import CommandFailedError, InvalidJobIdError
+from researchops.labops.errors import CommandFailedError, CommandPolicyError, InvalidJobIdError
+from researchops.labops.policy import validate_command
 from researchops.labops.schemas import Experiment, Gpu, JobHandle, JobStatus, Metrics
 from researchops.labops.ssh import CommandResult, CommandRunner
 
@@ -175,6 +177,10 @@ class LabClient:
         validate_job_id(job_id)
         if not command.strip():
             raise CommandFailedError("submit_job: command is empty")
+
+        violation = validate_command(command)
+        if violation is not None:
+            raise CommandPolicyError(f"submit_job: {violation}")
 
         live = parse_screen_sessions((await self._runner.run("screen -ls")).stdout)
         if job_id in live:

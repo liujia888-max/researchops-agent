@@ -123,7 +123,11 @@ def test_export_trace_builds_span_tree_and_returns_url() -> None:
     planner = lf.started[1]
     assert planner["model"] == "m"
     assert planner["usage_details"] == {"input": 100, "output": 10, "total": 110}
-    assert planner["cost_details"]["total"] == pytest.approx((100 * 0.27 + 10 * 1.10) / 1_000_000)
+    from researchops.config import get_settings
+    cfg = get_settings()
+    assert planner["cost_details"]["total"] == pytest.approx(
+        (100 * cfg.llm_input_price_per_1m + 10 * cfg.llm_output_price_per_1m) / 1_000_000
+    )
 
     rag = lf.started[4]
     assert rag["metadata"]["latency_s"] == 0.05

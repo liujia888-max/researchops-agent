@@ -59,6 +59,14 @@ class Settings(BaseSettings):
     # (e.g. postgresql+asyncpg://user:pass@host/db) for production — no code change.
     db_url: str = "sqlite+aiosqlite:///.researchops/experiments.db"
 
+    # Cost estimation & budget cap. Prices are USD per 1M tokens and feed the local
+    # trace summary + Langfuse cost panel. Defaults are the current DeepSeek-chat list
+    # prices; override per provider/deployment via env. ``agent_max_cost_usd`` is the
+    # hard cap for one agent run (0 = unlimited); set it for public deployments.
+    llm_input_price_per_1m: float = 0.14
+    llm_output_price_per_1m: float = 0.28
+    agent_max_cost_usd: float = 0.0
+
     # Phase 3 — observability: Langfuse (cloud) trace/cost/latency dashboards.
     # Empty keys => exporter disabled (the local `--trace` summary still works).
     langfuse_public_key: str = ""
