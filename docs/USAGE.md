@@ -85,7 +85,7 @@ docker compose up -d
 ## 开发自检
 
 ```bash
-make check      # = ruff check . + mypy src + pytest（93 passed）
+make check      # = ruff check . + mypy src + pytest（118 passed）
 ```
 
 ## 你自己（依赖已就绪）的日常流程

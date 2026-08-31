@@ -8,7 +8,7 @@
 >
 > - **RAG**：Recall@5=0.857 / Hit@5=1.0 / MRR@5=0.621；RAGAS faithfulness=0.958 / answer_relevancy=0.837（[phase1](docs/phase1-rag-results.md)）
 > - **Agent 端到端**：一句话任务 → 自主检索/提交/轮询/落库/出报告；复现 Restormer vs model_v3_rgb 在 CBSD68 σ=25 领先 **+1.81 dB**（[phase2](docs/phase2-repro-results.md)）
-> - **Agent 轨迹评测**（golden set 3 任务）：完成率 **1.0** / 答案正确率 **1.0** / 工具召回 **1.0** / 工具精确率 **0.83** / 平均步数 **1.33** / 单任务成本 **~$0.0027** / 平均延迟 **9.7s**
+> - **Agent 轨迹评测**（golden set 18 任务，LLM-judge）：完成率 **1.0** / 答案正确率 **0.889** / 工具召回 **1.0** / 工具精确率 **0.778** / 平均步数 **2.06** / 单任务成本 **~$0.0042** / 平均延迟 **14.1s**（[phase3](docs/phase3-agent-eval-results.md)）
 >
 > 完整路线见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
