@@ -97,6 +97,12 @@ class ExperimentStore:
                 await session.scalar(select(Experiment).where(Experiment.name == name)),
             )
 
+    async def list_experiments(self) -> list[Experiment]:
+        """Return every experiment, oldest first."""
+        async with self._sessions() as session:
+            rows = await session.scalars(select(Experiment).order_by(Experiment.id))
+            return list(rows)
+
     async def list_runs(self, experiment_id: int) -> list[JobRun]:
         async with self._sessions() as session:
             rows = await session.scalars(

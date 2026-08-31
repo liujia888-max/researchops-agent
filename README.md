@@ -33,16 +33,36 @@ cp .env.example .env   # 填入 LLM API Key
 uvicorn researchops.server.main:app --reload
 ```
 
+## 网页版（Web App）
+
+后端起好后，再起前端（Next.js + React），浏览器打开 `http://localhost:3000`：
+
+```bash
+cd web
+npm install
+npm run dev        # 开发模式
+# 或 npm run build && npm start  生产模式
+```
+
+前端默认连 `http://localhost:8000`，如需改后端地址，用环境变量 `NEXT_PUBLIC_API_BASE` 覆盖：
+
+```bash
+NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000 npm run dev
+```
+
+界面支持：SSE 流式查看 Agent 每一步（计划 → 工具调用 → 工具结果 → 最终报告）、勾选 Langfuse 追踪、展示本次 Trace 的 token/成本、以及历史实验列表。
+
 ## 架构
 
 ```
 Windows 本地（控制面）              远程 AutoDL GPU（执行面）
 ┌─────────────────────┐           ┌──────────────────────────┐
-│ FastAPI + SSE       │           │ 训练/测试任务 (screen)     │
-│  ├─ LangGraph Agent │  ──SSH──▶ │ vLLM 开源模型 (supervisord)│
-│  ├─ RAG (Qdrant)    │           │ bge-m3 embedding/reranker │
-│  └─ labops MCP      │           │ MinerU 论文解析            │
-└─────────────────────┘           └──────────────────────────┘
+│ Next.js 前端 (:3000) │           │ 训练/测试任务 (screen)     │
+│ FastAPI + SSE (:8000)│  ──SSH──▶ │ vLLM 开源模型 (supervisord)│
+│  ├─ LangGraph Agent │           │ bge-m3 embedding/reranker │
+│  ├─ RAG (Qdrant)    │           │ MinerU 论文解析            │
+│  └─ labops MCP      │           └──────────────────────────┘
+└─────────────────────┘
 ```
 
 详见 [docs/ROADMAP.md](docs/ROADMAP.md)。
