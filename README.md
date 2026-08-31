@@ -20,6 +20,35 @@
 
 ## 快速开始
 
+### 一键跑通（Docker Compose，无 GPU 也能跑）
+
+```bash
+git clone git@github.com:liujia888-max/researchops-agent.git
+cd researchops-agent
+cp .env.example .env        # 填入一个 LLM API Key（DeepSeek / Qwen 二选一）
+docker compose up --build
+```
+
+起好后：
+
+- **网页版**：`http://localhost:3000`（上传文档 → 输入任务 → 看流式报告）
+- **API 文档**：`http://localhost:8000/docs`
+- **Langfuse 面板**：`http://localhost:3001`（需在 `.env` 填 Langfuse key）
+
+一键灌入示例文档，立刻体验 RAG 问答：
+
+```bash
+docker compose exec api researchops ingest examples/sample_document.md
+docker compose exec api researchops search "denoising method"
+```
+
+> **为什么没有 GPU 也能跑通 RAG？** 默认 `RAG_FALLBACK_LOCAL=true`：embedding/reranker
+> 推理服务不可达时，自动退化为零依赖的 feature-hash 嵌入（词法检索），链路不报错。
+> 想要语义检索质量，把 `INFERENCE_BASE_URL` 指向一台跑着 `scripts/inference_server.py`
+> 的主机即可（bge-m3 + reranker）。GPU 在本项目里始终是**可选资源**。
+
+### 本地开发路径（conda + uvicorn）
+
 ```bash
 # 1. 环境（Python 3.12）
 conda create -y -p .venv python=3.12 pip
@@ -28,14 +57,19 @@ conda create -y -p .venv python=3.12 pip
 # 2. 安装
 pip install -e ".[dev]"
 
-# 3. 跑起来
-cp .env.example .env   # 填入 LLM API Key
+# 3. 自检外部依赖（LLM / Qdrant / embedding / GPU 主机逐项报告）
+cp .env.example .env        # 填入 LLM API Key
+researchops doctor
+
+# 4. 跑起来
 uvicorn researchops.server.main:app --reload
 ```
 
 > 更完整的「自己怎么用 / 别人怎么用」分层说明（按外部依赖分层、命令一览、网页版、Docker）见 [docs/USAGE.md](docs/USAGE.md)。
 
 ## 网页版（Web App）
+
+> `docker compose up` 已内置前端（`http://localhost:3000`）。下面是自己手动起前端的方式。
 
 后端起好后，再起前端（Next.js + React），浏览器打开 `http://localhost:3000`：
 

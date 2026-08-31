@@ -1,0 +1,30 @@
+# Build context hygiene for `docker compose build`. Keeps the context small and
+# guarantees secrets / local artifacts never end up in an image layer.
+.git
+.gitignore
+.env
+.env.*
+*.db
+*.sqlite3
+.researchops/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+htmlcov/
+
+# Frontend: install fresh node_modules inside the image instead of shipping the
+# host's (possibly Windows-built) tree.
+web/node_modules/
+web/.next/
+web/out/
+node_modules/
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store

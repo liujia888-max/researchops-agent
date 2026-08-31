@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     # Hybrid retrieval: number of candidates per branch before RRF + rerank.
     retrieval_top_k: int = 20
     retrieval_rerank_top_k: int = 5
+    # When the inference service is unreachable, degrade to a zero-dependency
+    # feature-hash embedder (lexical retrieval) instead of erroring out. Keeps
+    # RAG working on a machine with no GPU/embedding service; set false to fail
+    # fast when you require semantic (bge-m3) quality.
+    rag_fallback_local: bool = True
 
     # Phase 2 — labops MCP server: SSH to the GPU host for experiment orchestration.
     # Defaults point at the current AutoDL host; override via env for any other host.

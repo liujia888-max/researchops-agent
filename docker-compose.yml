@@ -8,11 +8,25 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      # Inside compose the services talk by name; these override the localhost
+      # defaults so the API reaches Qdrant without any .env changes.
+      QDRANT_URL: http://qdrant:6333
     depends_on:
       - postgres
       - redis
       - qdrant
       - langfuse
+
+  # Next.js chat UI. Reaches the API at http://localhost:8000 (browser -> host port).
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -55,7 +69,7 @@ services:
       ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
       TELEMETRY_ENABLED: "false"
     ports:
-      - "3000:3000"
+      - "3001:3000"
 
 volumes:
   pgdata:

@@ -27,6 +27,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("mcp", help="run the labops MCP server over stdio")
 
+    sub.add_parser("doctor", help="check external dependencies (LLM/Qdrant/embedding/GPU)")
+
     p = sub.add_parser("agent", help="run the agent end-to-end on a research task")
     p.add_argument("task", help="the research task, e.g. 'reproduce Restormer on CBSD68'")
     p.add_argument("--max-iterations", type=int, default=10)
@@ -176,6 +178,13 @@ async def _agent(
             lf.shutdown()
 
 
+async def _doctor() -> None:
+    from researchops.doctor import format_report, run_doctor
+
+    report = await run_doctor()
+    print(format_report(report))
+
+
 def main() -> None:
     args = _build_parser().parse_args()
     if args.command == "ping":
@@ -184,6 +193,8 @@ def main() -> None:
         asyncio.run(_ingest(args.pdf))
     elif args.command == "search":
         asyncio.run(_search(args.query, args.top_k))
+    elif args.command == "doctor":
+        asyncio.run(_doctor())
     elif args.command == "mcp":
         from researchops.mcp.server import mcp
 
