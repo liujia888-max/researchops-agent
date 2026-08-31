@@ -33,6 +33,8 @@ cp .env.example .env   # 填入 LLM API Key
 uvicorn researchops.server.main:app --reload
 ```
 
+> 更完整的「自己怎么用 / 别人怎么用」分层说明（按外部依赖分层、命令一览、网页版、Docker）见 [docs/USAGE.md](docs/USAGE.md)。
+
 ## 网页版（Web App）
 
 后端起好后，再起前端（Next.js + React），浏览器打开 `http://localhost:3000`：
