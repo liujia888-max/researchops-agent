@@ -129,8 +129,8 @@ def _check_command_policy(command: str) -> str | None:
 def make_rag_search_tool(retriever: Retriever) -> Tool:
     """Retrieve cited chunks from the paper library."""
 
-    async def handler(query: str, top_k: int = 5) -> str:
-        results = await retriever.retrieve(query, rerank_top_k=top_k)
+    async def handler(query: str, top_k: int = 5, doc_id: str | None = None) -> str:
+        results = await retriever.retrieve(query, rerank_top_k=top_k, doc_id=doc_id)
         if not results:
             return "No matching chunks found."
         lines = [
@@ -150,6 +150,10 @@ def make_rag_search_tool(retriever: Retriever) -> Tool:
             "properties": {
                 "query": {"type": "string", "description": "search query"},
                 "top_k": {"type": "integer", "description": "number of chunks", "default": 5},
+                "doc_id": {
+                    "type": "string",
+                    "description": "restrict the search to one document by its doc_id",
+                },
             },
             "required": ["query"],
         },

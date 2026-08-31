@@ -7,6 +7,7 @@ embedding service needed); a semantic backend (embedding over Qdrant) is the doc
 upgrade path when a GPU/embedding service is available.
 """
 
+from researchops.memory.semantic import SemanticMemoryStore
 from researchops.memory.store import MemoryEntry, MemoryStore, SqliteMemoryStore
 
-__all__ = ["MemoryEntry", "MemoryStore", "SqliteMemoryStore"]
+__all__ = ["MemoryEntry", "MemoryStore", "SqliteMemoryStore", "SemanticMemoryStore"]

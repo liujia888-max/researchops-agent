@@ -73,3 +73,16 @@ async def test_memory_search_tool_formats_results(tmp_path) -> None:
         assert empty == "No relevant past experiments or notes found in memory."
     finally:
         await store.close()
+
+
+async def test_list_entries_returns_all_in_order(tmp_path) -> None:
+    store = SqliteMemoryStore(str(tmp_path / "memory.db"))
+    try:
+        await store.remember("first")
+        await store.remember("second", kind="experiment")
+        entries = await store.list_entries()
+        assert [e.text for e in entries] == ["first", "second"]
+        assert entries[1].kind == "experiment"
+        assert entries[0].id < entries[1].id
+    finally:
+        await store.close()

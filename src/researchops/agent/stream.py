@@ -22,6 +22,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from researchops.agent.graph import build_agent
+from researchops.agent.multi import MultiAgentState, build_multi_agent
 from researchops.agent.state import AgentState
 from researchops.agent.tools import ToolRegistry
 from researchops.llm.providers import BaseLLM
@@ -35,6 +36,7 @@ async def stream_agent(
     max_iterations: int = 10,
     max_retries: int = 2,
     retry_backoff_s: float = 1.0,
+    reflect: bool = False,
 ) -> AsyncIterator[dict[str, Any]]:
     """Run the agent, yielding one event per graph node transition."""
     app = build_agent(
@@ -43,6 +45,7 @@ async def stream_agent(
         max_iterations=max_iterations,
         max_retries=max_retries,
         retry_backoff_s=retry_backoff_s,
+        reflect=reflect,
     )
     initial = AgentState(task=task, max_iterations=max_iterations)
 
@@ -68,5 +71,62 @@ async def stream_agent(
                         "arguments": last.arguments,
                         "output": last.output,
                     }
+            elif node == "reporter":
+                yield {"event": "report", "report": update.get("final_report", "")}
+            elif node == "reflector":
+                yield {
+                    "event": "report",
+                    "report": update.get("final_report", ""),
+                    "revised": True,
+                }
+
+
+async def stream_multi_agent(
+    task: str,
+    *,
+    llm: BaseLLM,
+    registry: ToolRegistry,
+    max_iterations: int = 10,
+    max_retries: int = 2,
+    retry_backoff_s: float = 1.0,
+) -> AsyncIterator[dict[str, Any]]:
+    """Run the supervisor + specialists team, yielding one event per graph node.
+
+    The multi-agent graph runs its specialists *inside* the ``workers`` node, so the
+    stream is coarser than the single-agent one: ``supervisor`` (roles + briefs), then
+    one ``specialists`` event bundling every specialist's findings and summaries, then
+    the final ``report``.
+    """
+    app = build_multi_agent(
+        llm,
+        registry,
+        max_iterations=max_iterations,
+        max_retries=max_retries,
+        retry_backoff_s=retry_backoff_s,
+    )
+    initial = MultiAgentState(task=task, max_iterations=max_iterations)
+
+    async for chunk in app.astream(initial, stream_mode="updates"):
+        for node, update in chunk.items():
+            if node == "supervisor":
+                yield {
+                    "event": "supervisor",
+                    "roles": list(update.get("roles") or []),
+                    "plan": list(update.get("plan") or []),
+                }
+            elif node == "workers":
+                findings = update.get("findings") or {}
+                yield {
+                    "event": "specialists",
+                    "roles": list(findings),
+                    "summaries": update.get("summaries") or {},
+                    "findings": {
+                        role: [
+                            {"tool": fr.tool, "arguments": fr.arguments, "output": fr.output}
+                            for fr in results
+                        ]
+                        for role, results in findings.items()
+                    },
+                }
             elif node == "reporter":
                 yield {"event": "report", "report": update.get("final_report", "")}

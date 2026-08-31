@@ -17,6 +17,7 @@ async def run_agent(
     max_iterations: int = 10,
     max_retries: int = 2,
     retry_backoff_s: float = 1.0,
+    reflect: bool = False,
 ) -> AgentState:
     """Run the agent on a task and return the final state (incl. ``final_report``)."""
     app = build_agent(
@@ -25,6 +26,7 @@ async def run_agent(
         max_iterations=max_iterations,
         max_retries=max_retries,
         retry_backoff_s=retry_backoff_s,
+        reflect=reflect,
     )
     result = await app.ainvoke(AgentState(task=task, max_iterations=max_iterations))
     if isinstance(result, AgentState):

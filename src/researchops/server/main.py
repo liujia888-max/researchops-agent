@@ -100,6 +100,8 @@ class AgentRunRequest(BaseModel):
     task: str = Field(min_length=1, max_length=2000)
     max_iterations: int = Field(default=10, ge=1, le=50)
     langfuse: bool = Field(default=False)
+    multi: bool = Field(default=False)
+    reflect: bool = Field(default=False)
 
 
 class ApprovalDecision(BaseModel):
@@ -144,7 +146,7 @@ async def agent_stream(req: AgentRunRequest) -> StreamingResponse:
     settings: Settings = app.state.settings
 
     async def events() -> AsyncIterator[str]:
-        from researchops.agent.stream import stream_agent
+        from researchops.agent.stream import stream_agent, stream_multi_agent
         from researchops.agent.tools import build_default_tools
         from researchops.db.store import ExperimentStore
         from researchops.mcp.client import LabopsMCPClient
@@ -198,12 +200,22 @@ async def agent_stream(req: AgentRunRequest) -> StreamingResponse:
             try:
                 Path(".researchops").mkdir(exist_ok=True)  # noqa: ASYNC240  # one-time, not hot-path I/O
                 await store.init()
-                async for event in stream_agent(
-                    req.task,
-                    llm=traced_llm,
-                    registry=traced_registry,
-                    max_iterations=req.max_iterations,
-                ):
+                if req.multi:
+                    streamer = stream_multi_agent(
+                        req.task,
+                        llm=traced_llm,
+                        registry=traced_registry,
+                        max_iterations=req.max_iterations,
+                    )
+                else:
+                    streamer = stream_agent(
+                        req.task,
+                        llm=traced_llm,
+                        registry=traced_registry,
+                        max_iterations=req.max_iterations,
+                        reflect=req.reflect,
+                    )
+                async for event in streamer:
                     queue.put_nowait(_sse(event))
                 queue.put_nowait(_sse({"event": "trace", "summary": trace.summary()}))
                 if req.langfuse and is_configured(settings):

@@ -23,7 +23,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from researchops.agent.graph import PLANNER_PROMPT, REPORTER_PROMPT, SYSTEM_PROMPT
+from researchops.agent.graph import PLANNER_PROMPT, REFLECTOR_PROMPT, REPORTER_PROMPT, SYSTEM_PROMPT
 from researchops.agent.multi import (
     LABOPS_PROMPT,
     MULTI_REPORTER_PROMPT,
@@ -168,6 +168,8 @@ def _infer_node(messages: list[ChatMessage]) -> str:
         return "planner"
     if first == REPORTER_PROMPT or first == MULTI_REPORTER_PROMPT:
         return "reporter"
+    if first == REFLECTOR_PROMPT:
+        return "reflector"
     if first == SUPERVISOR_PROMPT:
         return "supervisor"
     if first == RESEARCHER_PROMPT:

@@ -446,3 +446,42 @@ async def test_run_experiment_runs_and_persists(tmp_path: Path) -> None:
         ("ssim", 0.86, 25),
     ]
     await store.close()
+
+
+# --------------------------------------------------------------------------- #
+# Reflection (optional post-report critique pass)
+# --------------------------------------------------------------------------- #
+async def test_run_agent_with_reflection_revises_report() -> None:
+    """With reflect=True, a reflector node runs after the reporter and its output wins."""
+    registry = ToolRegistry([_make_tool("t", "evidence")])
+    llm = FakeLLM(
+        [
+            ChatResponse(content="- step\n", model="fake"),  # planner
+            _tool_call("t", {}),  # executor -> tool
+            ChatResponse(content="done", model="fake"),  # executor -> finish
+            ChatResponse(content="draft report", model="fake"),  # reporter
+            ChatResponse(content="revised final report", model="fake"),  # reflector
+        ]
+    )
+
+    state = await run_agent("task", llm=llm, registry=registry, max_iterations=5, reflect=True)
+
+    assert state.final_report == "revised final report"
+
+
+async def test_run_agent_without_reflection_skips_reflector() -> None:
+    """Default reflect=False: the reporter's output is final (no extra LLM call)."""
+    registry = ToolRegistry([_make_tool("t", "evidence")])
+    llm = FakeLLM(
+        [
+            ChatResponse(content="- step\n", model="fake"),  # planner
+            _tool_call("t", {}),  # executor -> tool
+            ChatResponse(content="done", model="fake"),  # executor -> finish
+            ChatResponse(content="draft report", model="fake"),  # reporter
+        ]
+    )
+
+    state = await run_agent("task", llm=llm, registry=registry, max_iterations=5)
+
+    assert state.final_report == "draft report"
+    assert llm.calls == 4  # planner + executor x2 + reporter (no reflector)

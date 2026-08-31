@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from researchops.agent.stream import stream_agent
+from researchops.agent.stream import stream_agent, stream_multi_agent
 from researchops.agent.tools import Tool, ToolRegistry
 from researchops.llm.providers import BaseLLM, ChatResponse, ToolCall
 from researchops.observability.trace import Trace, TracedLLM, TracedToolRegistry
@@ -106,3 +106,57 @@ async def test_stream_agent_with_tracing_populates_trace() -> None:
     assert len(trace.tool_spans) == 1
     assert trace.tool_spans[0].name == "rag_search"
     assert trace.total_tokens == 15 + 25 + 40
+
+
+async def test_stream_agent_reflection_emits_revised_report() -> None:
+    llm = FakeLLM(
+        [
+            ChatResponse(content="- step\n", model="fake"),
+            _tool_call("rag_search", {"query": "x"}),
+            ChatResponse(content="found", model="fake"),
+            ChatResponse(content="draft", model="fake"),
+            ChatResponse(content="revised", model="fake"),
+        ]
+    )
+
+    events = [
+        e
+        async for e in stream_agent(
+            "task", llm=llm, registry=_rag_registry(), max_iterations=5, reflect=True
+        )
+    ]
+
+    assert [e["event"] for e in events] == ["plan", "tool_call", "tool_result", "report", "report"]
+    assert events[3]["report"] == "draft"
+    assert events[4]["report"] == "revised"
+    assert events[4]["revised"] is True
+
+
+async def test_stream_multi_agent_emits_supervisor_specialists_report() -> None:
+    llm = FakeLLM(
+        [
+            ChatResponse(
+                content=json.dumps(
+                    {"specialists": ["researcher"], "briefs": {"researcher": "find method"}}
+                ),
+                model="fake",
+            ),
+            _tool_call("rag_search", {"query": "method"}),
+            ChatResponse(content="self-augmented method", model="fake"),
+            ChatResponse(content="# Report\nmethod", model="fake"),
+        ]
+    )
+
+    events = [
+        e
+        async for e in stream_multi_agent(
+            "task", llm=llm, registry=_rag_registry(), max_iterations=5
+        )
+    ]
+
+    assert [e["event"] for e in events] == ["supervisor", "specialists", "report"]
+    assert events[0]["roles"] == ["researcher"]
+    assert events[1]["roles"] == ["researcher"]
+    assert events[1]["summaries"] == {"researcher": "self-augmented method"}
+    assert events[1]["findings"]["researcher"][0]["tool"] == "rag_search"
+    assert events[2]["report"] == "# Report\nmethod"

@@ -27,16 +27,25 @@ class Retriever:
         self._store = QdrantStore(self._settings)
         self._client = AsyncQdrantClient(url=self._settings.qdrant_url, check_compatibility=False)
 
-    async def fuse(self, query: str, *, top_k: int | None = None) -> list[Chunk]:
+    async def fuse(
+        self, query: str, *, top_k: int | None = None, doc_id: str | None = None
+    ) -> list[Chunk]:
         """Hybrid RRF fusion only (no rerank) — the candidate pool.
 
         Split out so the eval harness can compare the fused ordering against the
-        reranked one (the "rerank delta" metric).
+        reranked one (the "rerank delta" metric). ``doc_id`` restricts the search to a
+        single document's chunks.
         """
         settings = self._settings
         top_k = top_k or settings.retrieval_top_k
 
         (dense, sparse_idx, sparse_val) = (await self._embedder.embed([query]))[0]
+
+        query_filter = None
+        if doc_id is not None:
+            query_filter = models.Filter(
+                must=[models.FieldCondition(key="doc_id", match=models.MatchValue(value=doc_id))]
+            )
 
         # Hybrid query: dense + sparse branches fused by RRF inside Qdrant.
         result = await self._client.query_points(
@@ -51,19 +60,26 @@ class Retriever:
             ],
             query=models.FusionQuery(fusion=models.Fusion.RRF),
             limit=top_k,
+            query_filter=query_filter,
         )
 
         return [_point_to_chunk(p) for p in result.points]
 
     async def retrieve(
-        self, query: str, *, top_k: int | None = None, rerank_top_k: int | None = None
+        self,
+        query: str,
+        *,
+        top_k: int | None = None,
+        rerank_top_k: int | None = None,
+        doc_id: str | None = None,
     ) -> list[RetrievedChunk]:
         """Fuse a candidate pool, then rerank it down to the final top-k.
 
         ``top_k`` sizes the fusion candidate pool; ``rerank_top_k`` is the final
-        answer size (defaults to the config's ``retrieval_rerank_top_k``).
+        answer size (defaults to the config's ``retrieval_rerank_top_k``); ``doc_id``
+        optionally scopes the search to one document.
         """
-        candidates = await self.fuse(query, top_k=top_k)
+        candidates = await self.fuse(query, top_k=top_k, doc_id=doc_id)
         rerank_top_k = rerank_top_k or self._settings.retrieval_rerank_top_k
         return await self.rerank(query, candidates, top_k=rerank_top_k)
 

@@ -49,6 +49,12 @@ concise, well-structured report that directly answers the task. Cite evidence wi
 matching the numbering in the rag_search results. Do not invent numbers absent from the
 evidence. Use markdown headings and finish with a short "Conclusion"."""
 
+REFLECTOR_PROMPT = """You are a critical reviewer of a research report. Read the draft report
+and the raw evidence it was built from, then fix it: (1) strike any number or claim not
+supported by the evidence, (2) add missing citations, (3) close gaps so the report fully
+answers the task. Preserve the markdown structure and [n] citation numbers. If the draft is
+already sound, output it unchanged."""
+
 _BULLET = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s*")
 
 # ``ToolRegistry.execute`` prefixes a raised exception with this string; retry logic
@@ -96,8 +102,12 @@ def build_agent(
     max_iterations: int = 10,
     max_retries: int = 2,
     retry_backoff_s: float = 1.0,
+    reflect: bool = False,
 ) -> Any:
     """Compile the agent graph against an injected LLM and tool registry.
+
+    With ``reflect=True`` an extra ``reflector`` node runs after the reporter and
+    critiques/revises the draft report against the evidence before it is returned.
 
     ``max_retries`` bounds how many times a *failing* primitive tool call is re-attempted
     (with ``retry_backoff_s`` between attempts) before its error is accepted as evidence.
@@ -223,6 +233,26 @@ def build_agent(
         )
         return {"final_report": resp.content}
 
+    async def reflector(state: AgentState) -> dict[str, Any]:
+        evidence = "\n\n".join(
+            f"### {r.tool}({r.arguments})\n{r.output}" for r in state.tool_results
+        ) or "(no tool evidence was gathered)"
+        resp = await llm.chat(
+            [
+                ChatMessage(role="system", content=REFLECTOR_PROMPT),
+                ChatMessage(
+                    role="user",
+                    content=(
+                        f"Task: {state.task}\n\nEvidence:\n{evidence}\n\n"
+                        f"Draft report:\n{state.final_report}"
+                    ),
+                ),
+            ],
+            temperature=0.2,
+            max_tokens=2048,
+        )
+        return {"final_report": resp.content}
+
     def route_executor(state: AgentState) -> str:
         return "tools" if state.pending_tool is not None else "reporter"
 
@@ -231,11 +261,17 @@ def build_agent(
     graph.add_node("executor", executor)
     graph.add_node("tools", tools)
     graph.add_node("reporter", reporter)
+    if reflect:
+        graph.add_node("reflector", reflector)
 
     graph.add_edge(START, "planner")
     graph.add_edge("planner", "executor")
     graph.add_conditional_edges("executor", route_executor, {"tools": "tools", "reporter": "reporter"})
     graph.add_edge("tools", "executor")
-    graph.add_edge("reporter", END)
+    if reflect:
+        graph.add_edge("reporter", "reflector")
+        graph.add_edge("reflector", END)
+    else:
+        graph.add_edge("reporter", END)
 
     return graph.compile()

@@ -16,6 +16,8 @@ from typing import Protocol
 
 import aiosqlite
 
+from researchops.config import get_settings
+
 _TOKEN = re.compile(r"[a-z0-9]+")
 
 
@@ -47,12 +49,13 @@ class MemoryStore(Protocol):
 class SqliteMemoryStore:
     """SQLite-backed episodic memory with lexical recall.
 
-    ``path`` defaults to a git-ignored file under ``.researchops/``. The table is
-    created lazily on first use, so the store can be constructed without touching disk.
+    ``path`` defaults to the configured ``Settings.memory_path`` (a git-ignored file
+    under ``.researchops/``). The table is created lazily on first use, so the store
+    can be constructed without touching disk.
     """
 
-    def __init__(self, path: str = ".researchops/memory.db") -> None:
-        self._path = path
+    def __init__(self, path: str | None = None) -> None:
+        self._path = path if path is not None else get_settings().memory_path
         self._conn: aiosqlite.Connection | None = None
 
     async def _db(self) -> aiosqlite.Connection:
@@ -101,6 +104,22 @@ class SqliteMemoryStore:
 
         scored.sort(key=lambda pair: pair[0], reverse=True)
         return [entry for _, entry in scored[:k]]
+
+    async def list_entries(self) -> list[MemoryEntry]:
+        """Return every stored entry (in insertion order).
+
+        Used by the semantic backend to re-score entries with embeddings; kept public
+        so a future UI can browse the memory log without going through ``recall``.
+        """
+        db = await self._db()
+        cursor = await db.execute("SELECT id, text, kind, created_at FROM memories")
+        rows = await cursor.fetchall()
+        return [
+            MemoryEntry(
+                id=int(r[0]), text=str(r[1]), kind=str(r[2]), created_at=str(r[3])
+            )
+            for r in rows
+        ]
 
     async def close(self) -> None:
         if self._conn is not None:

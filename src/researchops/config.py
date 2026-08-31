@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     # (e.g. postgresql+asyncpg://user:pass@host/db) for production — no code change.
     db_url: str = "sqlite+aiosqlite:///.researchops/experiments.db"
 
+    # Long-term episodic memory (SQLite backend, git-ignored by default).
+    memory_path: str = ".researchops/memory.db"
+
     # Cost estimation & budget cap. Prices are USD per 1M tokens and feed the local
     # trace summary + Langfuse cost panel. Defaults are the current DeepSeek-chat list
     # prices; override per provider/deployment via env. ``agent_max_cost_usd`` is the

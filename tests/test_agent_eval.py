@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from researchops.agent.tools import Tool, ToolRegistry
@@ -205,3 +206,23 @@ def test_load_tasks_from_json(tmp_path: Any) -> None:
     assert tasks[0].expected_facts == ["31.79"]
     assert tasks[1].expected_tools == []
     assert tasks[2].expected_facts == [["31.78", "31.79"]]
+
+
+def test_golden_set_is_well_formed() -> None:
+    """Guard the shipped golden set so CI catches a malformed edit to agent_tasks.json."""
+    path = Path(__file__).resolve().parents[1] / "golden_set" / "agent_tasks.json"
+    assert path.exists(), "golden_set/agent_tasks.json is missing"
+    tasks = load_tasks(str(path))
+    assert tasks, "golden set must not be empty"
+    for task in tasks:
+        assert task.id, "a task is missing its id"
+        assert task.task, f"task {task.id} is missing task text"
+        assert isinstance(task.expected_tools, list)
+        assert all(isinstance(t, str) and t for t in task.expected_tools)
+        assert isinstance(task.expected_facts, list)
+        for fact in task.expected_facts:
+            if isinstance(fact, list):
+                assert fact, f"task {task.id} has an empty alternatives list"
+                assert all(isinstance(a, str) and a for a in fact)
+            else:
+                assert isinstance(fact, str) and fact, f"task {task.id} has an empty fact"
