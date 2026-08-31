@@ -1,9 +1,51 @@
 [
   {
-    "id": "restormer-cbsd68-psnr",
-    "task": "Restormer 在 CBSD68 彩色去噪 σ=25 上的 PSNR 是多少？请检索论文并给出带引用的答案。",
+    "id": "n2n-title-method",
+    "task": "这篇论文提出的方法叫什么？请检索论文并给出带引用的答案。",
     "expected_tools": ["rag_search"],
-    "expected_facts": [["31.78", "31.79"]]
+    "expected_facts": ["self-augmented"]
+  },
+  {
+    "id": "n2n-two-subnets",
+    "task": "论文提出的方法包含哪两个子网络？请检索论文回答。",
+    "expected_tools": ["rag_search"],
+    "expected_facts": ["self-augmented noisy image network", "denoising network"]
+  },
+  {
+    "id": "n2n-problem",
+    "task": "这篇论文要解决的核心挑战是什么？请检索论文回答。",
+    "expected_tools": ["rag_search"],
+    "expected_facts": ["blind noise"]
+  },
+  {
+    "id": "n2n-no-ground-truth",
+    "task": "Noise2Noise 相比 Noise2Clean 的关键优势是什么？请检索论文回答。",
+    "expected_tools": ["rag_search"],
+    "expected_facts": [["ground truth", "ground-truth"]]
+  },
+  {
+    "id": "n2n-metrics",
+    "task": "论文用哪些指标评估去噪效果？请检索论文回答。",
+    "expected_tools": ["rag_search"],
+    "expected_facts": ["PSNR", "SSIM"]
+  },
+  {
+    "id": "n2n-applications",
+    "task": "论文提到该方法可用于哪些领域的图像？请检索论文回答。",
+    "expected_tools": ["rag_search"],
+    "expected_facts": ["medical images"]
+  },
+  {
+    "id": "n2n-authors",
+    "task": "这篇论文的作者来自哪所大学？请检索论文回答。",
+    "expected_tools": ["rag_search"],
+    "expected_facts": ["prince of songkla"]
+  },
+  {
+    "id": "n2n-augmentation-role",
+    "task": "自增强网络生成的噪声图像有什么作用？请检索论文回答。",
+    "expected_tools": ["rag_search"],
+    "expected_facts": [["validation data", "validation training"]]
   },
   {
     "id": "gpu-inventory",
@@ -15,6 +57,54 @@
     "id": "list-workdir",
     "task": "远程工作目录 /root/autodl-tmp 下有哪些顶层目录或文件？",
     "expected_tools": ["list_experiments"],
-    "expected_facts": ["pythonProject4"]
+    "expected_facts": []
+  },
+  {
+    "id": "check-job-status",
+    "task": "查看远程主机上名为 restormer_blind 的 screen 会话是否还在运行。",
+    "expected_tools": ["job_status"],
+    "expected_facts": []
+  },
+  {
+    "id": "tail-job-log",
+    "task": "查看远程主机上 restormer_blind 任务日志的最后几行。",
+    "expected_tools": ["tail_log"],
+    "expected_facts": []
+  },
+  {
+    "id": "multi-rag-gpu",
+    "task": "检索论文提出的方法，并查看远程 GPU 主机的当前状态。",
+    "expected_tools": ["rag_search", "gpu_info"],
+    "expected_facts": ["self-augmented"]
+  },
+  {
+    "id": "multi-rag-workdir",
+    "task": "检索论文的核心贡献，并列出远程工作目录的内容。",
+    "expected_tools": ["rag_search", "list_experiments"],
+    "expected_facts": ["self-augmented"]
+  },
+  {
+    "id": "multi-gpu-workdir",
+    "task": "查看远程 GPU 主机的状态和工作目录的内容。",
+    "expected_tools": ["gpu_info", "list_experiments"],
+    "expected_facts": []
+  },
+  {
+    "id": "multi-rag-jobstatus",
+    "task": "检索论文使用的评估指标，并检查 restormer_blind 会话的运行状态。",
+    "expected_tools": ["rag_search", "job_status"],
+    "expected_facts": ["PSNR"]
+  },
+  {
+    "id": "multi-full-sweep",
+    "task": "检索论文解决的核心挑战，并查看 GPU 状态和工作目录内容。",
+    "expected_tools": ["rag_search", "gpu_info", "list_experiments"],
+    "expected_facts": ["blind noise"]
+  },
+  {
+    "id": "multi-rag-tail",
+    "task": "检索论文方法，并查看 restormer_blind 任务日志的最后几行。",
+    "expected_tools": ["rag_search", "tail_log"],
+    "expected_facts": ["noise2noise"]
   }
 ]

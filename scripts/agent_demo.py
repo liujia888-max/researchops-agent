@@ -47,7 +47,7 @@ async def main() -> None:
     retriever = Retriever()
     lab_client = LabClient(SshConnection())
     store = ExperimentStore()
-    registry = build_default_tools(retriever, lab_client, approver=approver, store=store)
+    registry = await build_default_tools(retriever, lab_client, approver=approver, store=store)
 
     try:
         Path(".researchops").mkdir(exist_ok=True)

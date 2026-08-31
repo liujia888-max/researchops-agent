@@ -21,16 +21,22 @@ from researchops.llm import build_llm
 from researchops.rag.retriever import Retriever
 
 
-async def main(max_iterations: int) -> None:
+async def main(max_iterations: int, judge: bool) -> None:
     tasks = load_tasks("golden_set/agent_tasks.json")
     llm = build_llm()
     retriever = Retriever()
     lab_client = LabClient(SshConnection())
     # No store, no approver -> submit_job/cancel_job are deny-by-default and
     # run_experiment is unregistered: the eval is read-only.
-    registry = build_default_tools(retriever, lab_client)
+    registry = await build_default_tools(retriever, lab_client)
     try:
-        report = await run_eval(tasks, llm=llm, registry=registry, max_iterations=max_iterations)
+        report = await run_eval(
+            tasks,
+            llm=llm,
+            registry=registry,
+            max_iterations=max_iterations,
+            judge=judge,
+        )
     finally:
         await retriever.close()
         await lab_client.close()
@@ -38,7 +44,7 @@ async def main(max_iterations: int) -> None:
     print(json.dumps(report.as_dict(), ensure_ascii=False, indent=2, default=str))
     for o in report.outcomes:
         print(
-            f"\n[{o.task_id}] finished={o.finished} steps={o.steps} "
+            f"\n[{o.task_id}] finished={o.finished} passed={o.passed} steps={o.steps} "
             f"tools={o.called_tools} tokens={o.input_tokens + o.output_tokens}"
         )
         print(f"  report: {o.final_report[:160].strip()}")
@@ -47,5 +53,18 @@ async def main(max_iterations: int) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-iterations", type=int, default=10)
+    parser.add_argument(
+        "--judge",
+        dest="judge",
+        action="store_true",
+        default=True,
+        help="use an LLM judge for answer_accuracy (default)",
+    )
+    parser.add_argument(
+        "--no-judge",
+        dest="judge",
+        action="store_false",
+        help="fall back to substring matching instead of an LLM judge",
+    )
     args = parser.parse_args()
-    asyncio.run(main(args.max_iterations))
+    asyncio.run(main(args.max_iterations, args.judge))

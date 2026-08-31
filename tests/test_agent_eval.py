@@ -10,6 +10,7 @@ from researchops.eval.agent_eval import (
     GoldenTask,
     TaskOutcome,
     compute_report,
+    judge_report,
     load_tasks,
     run_eval,
     task_passed,
@@ -88,6 +89,20 @@ def test_task_passed_accepts_alternative_facts() -> None:
     assert task_passed(task, _outcome(finished=True, final_report="PSNR 30.00 dB")) is False
 
 
+def test_task_passed_is_case_insensitive() -> None:
+    task = GoldenTask(id="t", task="q", expected_facts=["PSNR", "SSIM"])
+    assert task_passed(task, _outcome(finished=True, final_report="psnr and ssim improved")) is True
+    assert task_passed(task, _outcome(finished=True, final_report="only psnr")) is False
+
+
+async def test_judge_report_pass_and_fail() -> None:
+    llm = _FakeBaseLLM([_resp("PASS"), _resp("FAIL"), _resp("pass")])
+    task = GoldenTask(id="t", task="q", expected_facts=["31.79"])
+    assert await judge_report(llm, task, "PSNR 31.79 dB") is True
+    assert await judge_report(llm, task, "PSNR 30.00 dB") is False
+    assert await judge_report(llm, task, "PSNR 31.79 dB") is True  # lowercase accepted
+
+
 def test_compute_report_aggregates() -> None:
     tasks = [GoldenTask(id="a", task="q", expected_tools=["rag"], expected_facts=["31.79"])]
     outcomes = [
@@ -138,6 +153,39 @@ async def test_run_eval_scripted_single_task() -> None:
     assert report.tool_recall == 1.0
     assert report.tool_precision == 1.0
     assert report.avg_steps == 1.0
+
+
+async def test_run_eval_judge_overrides_substring() -> None:
+    """With judge=True, an LLM verdict (here FAIL) overrides a substring match."""
+
+    async def rag_handler(query: str, top_k: int = 5) -> str:
+        return "[1] 31.79"
+
+    registry = ToolRegistry(
+        [
+            Tool(
+                name="rag_search",
+                description="d",
+                parameters={"type": "object", "properties": {}, "required": []},
+                handler=rag_handler,
+            )
+        ]
+    )
+    responses = [
+        _resp("- search\n", i=10, o=5),  # planner
+        _tool_call("rag_search", {"query": "x"}),  # executor -> tool
+        _resp("found 31.79", i=20, o=5),  # executor -> finish
+        _resp("# Report\nPSNR 31.79 dB", i=30, o=10),  # reporter (substring would PASS)
+        _resp("FAIL", i=5, o=1),  # judge -> FAIL (substring match is overridden)
+    ]
+    tasks = [GoldenTask(id="t1", task="q", expected_tools=["rag_search"], expected_facts=["31.79"])]
+
+    report = await run_eval(
+        tasks, llm=_FakeBaseLLM(responses), registry=registry, max_iterations=5, judge=True
+    )
+
+    assert report.answer_accuracy == 0.0
+    assert report.outcomes[0].passed is False
 
 
 def test_load_tasks_from_json(tmp_path: Any) -> None:
