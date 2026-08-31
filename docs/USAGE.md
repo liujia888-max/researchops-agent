@@ -9,7 +9,7 @@
 ## 最快路径：Docker 一键起全套（含前端）
 
 ```bash
-git clone git@github.com:liujia888-max/researchops-agent.git
+git clone https://github.com/liujia888-max/researchops-agent.git
 cd researchops-agent
 cp .env.example .env         # 填一个 LLM API Key（DeepSeek / Qwen 二选一）
 docker compose up --build

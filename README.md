@@ -23,7 +23,7 @@
 ### 一键跑通（Docker Compose，无 GPU 也能跑）
 
 ```bash
-git clone git@github.com:liujia888-max/researchops-agent.git
+git clone https://github.com/liujia888-max/researchops-agent.git
 cd researchops-agent
 cp .env.example .env        # 填入一个 LLM API Key（DeepSeek / Qwen 二选一）
 docker compose up --build
