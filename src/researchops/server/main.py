@@ -16,8 +16,10 @@ line. Tracing is always on; Langfuse export is opt-in per request.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -45,6 +47,15 @@ app = FastAPI(title="ResearchOps Agent", version="0.1.0", lifespan=lifespan)
 # Uploaded documents land here (git-ignored), then get ingested into Qdrant.
 UPLOAD_DIR = Path(".researchops/uploads")
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+# How long a destructive action waits for the user to approve/reject in the web UI
+# before the agent gives up and treats it as rejected.
+APPROVAL_TIMEOUT_S = 300.0
+
+# In-flight human-in-the-loop approvals: request_id -> Future[bool], resolved by the
+# ``POST /approvals/{request_id}`` endpoint. Keyed by a fresh uuid per action, so
+# concurrent streams can't cross wires.
+_PENDING_APPROVALS: dict[str, asyncio.Future[bool]] = {}
 
 
 def _safe_filename(name: str) -> str:
@@ -91,6 +102,10 @@ class AgentRunRequest(BaseModel):
     langfuse: bool = Field(default=False)
 
 
+class ApprovalDecision(BaseModel):
+    approve: bool
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "version": app.version}
@@ -120,7 +135,12 @@ def _sse(event: dict[str, Any]) -> str:
 
 @app.post("/agent/stream")
 async def agent_stream(req: AgentRunRequest) -> StreamingResponse:
-    """Run the agent and stream progress as server-sent events."""
+    """Run the agent and stream progress as server-sent events.
+
+    Destructive tools (``submit_job`` / ``run_experiment`` / ``cancel_job``) pause the
+    stream and emit a ``pending_approval`` event; the frontend renders an approve/reject
+    prompt and calls ``POST /approvals/{request_id}``, which resolves the wait.
+    """
     settings: Settings = app.state.settings
 
     async def events() -> AsyncIterator[str]:
@@ -136,38 +156,94 @@ async def agent_stream(req: AgentRunRequest) -> StreamingResponse:
         retriever = Retriever()
         lab_client = LabClient(SshConnection())
         store = ExperimentStore()
-        registry = build_default_tools(retriever, lab_client, store=store)
+
+        # The agent stream and the approval events share one queue: a producer task
+        # drains ``stream_agent`` while the (async) approver injects ``pending_approval``
+        # events into the same queue during a pause. Unbounded, so ``put_nowait`` is safe.
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+        async def approve(tool_name: str, arguments: dict[str, Any]) -> bool:
+            request_id = uuid.uuid4().hex[:12]
+            fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+            _PENDING_APPROVALS[request_id] = fut
+            queue.put_nowait(
+                _sse(
+                    {
+                        "event": "pending_approval",
+                        "request_id": request_id,
+                        "tool_name": tool_name,
+                        "arguments": arguments,
+                    }
+                )
+            )
+            try:
+                try:
+                    return await asyncio.wait_for(fut, timeout=APPROVAL_TIMEOUT_S)
+                except TimeoutError:
+                    return False
+            finally:
+                _PENDING_APPROVALS.pop(request_id, None)
+
+        registry = build_default_tools(retriever, lab_client, store=store, approver=approve)
         trace = Trace(task=req.task)
         traced_llm: BaseLLM = TracedLLM(llm, trace)
         traced_registry = TracedToolRegistry(registry, trace)
 
-        yield _sse({"event": "start", "task": req.task})
+        async def produce() -> None:
+            try:
+                Path(".researchops").mkdir(exist_ok=True)  # noqa: ASYNC240  # one-time, not hot-path I/O
+                await store.init()
+                async for event in stream_agent(
+                    req.task,
+                    llm=traced_llm,
+                    registry=traced_registry,
+                    max_iterations=req.max_iterations,
+                ):
+                    queue.put_nowait(_sse(event))
+                queue.put_nowait(_sse({"event": "trace", "summary": trace.summary()}))
+                if req.langfuse and is_configured(settings):
+                    lf = build_client(settings)
+                    try:
+                        url = export_trace(trace, lf=lf)
+                        lf.flush()
+                        queue.put_nowait(_sse({"event": "langfuse", "url": url}))
+                    finally:
+                        lf.shutdown()
+                queue.put_nowait(_sse({"event": "done"}))
+            except Exception as exc:  # noqa: BLE001 — surface failures as an SSE error event
+                queue.put_nowait(_sse({"event": "error", "message": str(exc)}))
+            finally:
+                queue.put_nowait(None)  # sentinel
+
+        producer = asyncio.create_task(produce())
         try:
-            Path(".researchops").mkdir(exist_ok=True)  # noqa: ASYNC240  # one-time, not hot-path I/O
-            await store.init()
-            async for event in stream_agent(
-                req.task,
-                llm=traced_llm,
-                registry=traced_registry,
-                max_iterations=req.max_iterations,
-            ):
-                yield _sse(event)
-            yield _sse({"event": "trace", "summary": trace.summary()})
-            if req.langfuse and is_configured(settings):
-                lf = build_client(settings)
-                try:
-                    url = export_trace(trace, lf=lf)
-                    lf.flush()
-                    yield _sse({"event": "langfuse", "url": url})
-                finally:
-                    lf.shutdown()
-            yield _sse({"event": "done"})
+            yield _sse({"event": "start", "task": req.task})
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
         finally:
+            producer.cancel()
+            try:
+                await producer
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 — swallow producer teardown
+                pass
             await retriever.close()
             await lab_client.close()
             await store.close()
 
     return StreamingResponse(events(), media_type="text/event-stream")
+
+
+@app.post("/approvals/{request_id}")
+async def decide_approval(request_id: str, decision: ApprovalDecision) -> dict[str, Any]:
+    """Resolve a pending human-in-the-loop approval raised by a running agent stream."""
+    fut = _PENDING_APPROVALS.get(request_id)
+    if fut is None or fut.done():
+        raise HTTPException(status_code=404, detail="unknown or already-resolved approval request")
+    fut.set_result(decision.approve)
+    return {"request_id": request_id, "approved": decision.approve}
 
 
 @app.get("/experiments")

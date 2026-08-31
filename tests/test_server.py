@@ -110,3 +110,28 @@ def test_delete_document(monkeypatch) -> None:
     resp = client.delete("/documents/notes")
     assert resp.status_code == 200
     assert resp.json() == {"deleted": "notes", "chunks": 7}
+
+
+def test_approval_endpoint_resolves_pending() -> None:
+    """POST /approvals/{id} resolves the in-flight Future a stream is awaiting."""
+    import researchops.server.main as main_mod
+
+    loop = asyncio.new_event_loop()
+    try:
+        fut = loop.create_future()
+        main_mod._PENDING_APPROVALS["abc123"] = fut
+
+        client = TestClient(app)
+        resp = client.post("/approvals/abc123", json={"approve": True})
+        assert resp.status_code == 200
+        assert resp.json() == {"request_id": "abc123", "approved": True}
+        assert fut.done() and fut.result() is True
+    finally:
+        main_mod._PENDING_APPROVALS.pop("abc123", None)
+        loop.close()
+
+
+def test_approval_endpoint_unknown_is_404() -> None:
+    client = TestClient(app)
+    resp = client.post("/approvals/does-not-exist", json={"approve": True})
+    assert resp.status_code == 404

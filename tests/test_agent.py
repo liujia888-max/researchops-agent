@@ -268,6 +268,22 @@ async def test_approver_can_selectively_deny() -> None:
     assert client.submitted == [("safe", "echo ok")]
 
 
+async def test_async_approver_is_awaited() -> None:
+    """An async approver (like the web server's) is awaited, not called and discarded."""
+    client = _FakeLabClient()
+    seen: list[str] = []
+
+    async def approver(name: str, args: dict[str, Any]) -> bool:
+        seen.append(name)
+        return True
+
+    tools = _tools_by_name(client, approver=approver)
+    out = await tools["submit_job"].handler(job_id="x", command="echo hi")
+    assert '"job_id": "x"' in out
+    assert seen == ["submit_job"]
+    assert client.submitted == [("x", "echo hi")]
+
+
 # --------------------------------------------------------------------------- #
 # run_experiment (deterministic submit->poll->persist tool)
 # --------------------------------------------------------------------------- #

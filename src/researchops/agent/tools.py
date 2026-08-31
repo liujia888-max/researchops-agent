@@ -8,6 +8,7 @@ ReAct loop can recover instead of crashing.
 
 from __future__ import annotations
 
+import inspect
 import json
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
@@ -77,14 +78,20 @@ def _dump(value: object) -> str:
 # A destructive action (submit_job / cancel_job) is gated by an approver that decides,
 # from (tool_name, arguments), whether to allow it. ``None`` means deny — the fail-safe
 # default — so an unguarded agent can only *propose* a dangerous call, never execute it.
-Approver = Callable[[str, dict[str, Any]], bool]
+# An approver may return a plain bool (e.g. the CLI's interactive prompt) or an awaitable
+# of one (e.g. the web server's human-in-the-loop that waits on an HTTP decision).
+Approver = Callable[[str, dict[str, Any]], bool | Awaitable[bool]]
 
 
-def _require_approval(
+async def _require_approval(
     tool_name: str, approver: Approver | None, arguments: dict[str, Any]
 ) -> str | None:
     """Return a rejection message if the action is not approved, else ``None``."""
-    if approver is None or not approver(tool_name, arguments):
+    decision: bool = False
+    if approver is not None:
+        result = approver(tool_name, arguments)
+        decision = await result if inspect.isawaitable(result) else bool(result)
+    if not decision:
         return (
             f"REJECTED: {tool_name} is a destructive action and needs human approval, "
             f"which was not granted, so it was NOT executed. arguments={arguments}. "
@@ -149,7 +156,7 @@ def make_labops_tools(
         return _dump([e.model_dump() for e in await client.list_experiments()])
 
     async def submit_job(job_id: str, command: str) -> str:
-        rejection = _require_approval(
+        rejection = await _require_approval(
             "submit_job", approver, {"job_id": job_id, "command": command}
         )
         if rejection is not None:
@@ -163,7 +170,7 @@ def make_labops_tools(
         return await client.tail_log(job_id, lines)
 
     async def cancel_job(job_id: str) -> str:
-        rejection = _require_approval("cancel_job", approver, {"job_id": job_id})
+        rejection = await _require_approval("cancel_job", approver, {"job_id": job_id})
         if rejection is not None:
             return rejection
         return _dump((await client.cancel_job(job_id)).model_dump())
@@ -265,7 +272,7 @@ def make_run_experiment_tool(
     async def run_experiment(
         experiment_name: str, job_id: str, command: str, task: str = ""
     ) -> str:
-        rejection = _require_approval(
+        rejection = await _require_approval(
             "run_experiment",
             approver,
             {"experiment_name": experiment_name, "job_id": job_id, "command": command},

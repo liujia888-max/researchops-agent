@@ -40,6 +40,12 @@ type Doc = {
   chunks: number;
 };
 
+type PendingApproval = {
+  request_id: string;
+  tool_name: string;
+  arguments: unknown;
+};
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -156,6 +162,7 @@ export default function Home() {
   const [documents, setDocuments] = useState<Doc[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
+  const [pending, setPending] = useState<PendingApproval | null>(null);
 
   // Auto-follow the stream only while the user is already at the bottom; a manual
   // scroll up disables it so reading isn't yanked back down mid-generation.
@@ -230,6 +237,21 @@ export default function Home() {
       if (res.ok) refreshDocuments();
     } catch {
       // keep last list on failure
+    }
+  }
+
+  async function decideApproval(approve: boolean) {
+    if (!pending) return;
+    const { request_id } = pending;
+    setPending(null);
+    try {
+      await fetch(`${API_BASE}/approvals/${request_id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approve }),
+      });
+    } catch {
+      // backend unreachable — the stream will time out and treat it as rejected
     }
   }
 
@@ -316,6 +338,13 @@ export default function Home() {
         break;
       case "langfuse":
         setLangfuseUrl(ev.url as string);
+        break;
+      case "pending_approval":
+        setPending({
+          request_id: ev.request_id as string,
+          tool_name: ev.tool_name as string,
+          arguments: ev.arguments,
+        });
         break;
       case "error":
         setError(ev.message as string);
@@ -533,6 +562,26 @@ export default function Home() {
           </div>
         </main>
       </div>
+
+      {pending && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <h3>⚠ 需要批准才能执行</h3>
+            <p>
+              Agent 请求执行危险操作 <code>{pending.tool_name}</code>，是否允许？
+            </p>
+            <pre className="approval-args">{JSON.stringify(pending.arguments, null, 2)}</pre>
+            <div className="modal-actions">
+              <button className="btn" onClick={() => decideApproval(true)}>
+                批准执行
+              </button>
+              <button className="btn secondary" onClick={() => decideApproval(false)}>
+                拒绝
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
