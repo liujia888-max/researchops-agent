@@ -44,6 +44,19 @@ npm run dev        # 开发模式
 # 或 npm run build && npm start  生产模式
 ```
 
+> Windows 本机注意：`node`/`npm` 不在系统 PATH 里（`node.exe` 在 `D:\node.exe`，npm 在 `D:\node_modules\npm\bin`）。两种方式任选：
+>
+> ```powershell
+> # 方式 A：临时加到当前终端 PATH，再照常跑
+> $env:Path = "D:\;" + $env:Path
+> npm install
+> npm run dev
+>
+> # 方式 B：不碰 PATH，直接指定 node 调 npm-cli
+> & "D:\node.exe" "D:\node_modules\npm\bin\npm-cli.js" install
+> & "D:\node.exe" "D:\node_modules\npm\bin\npm-cli.js" run dev
+> ```
+
 前端默认连 `http://localhost:8000`，如需改后端地址，用环境变量 `NEXT_PUBLIC_API_BASE` 覆盖：
 
 ```bash
