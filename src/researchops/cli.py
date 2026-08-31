@@ -36,6 +36,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="prompt for human approval before destructive labops actions (submit_job/cancel_job)",
     )
     p.add_argument(
+        "--multi",
+        action="store_true",
+        help="run the supervisor + specialists multi-agent team instead of the single agent",
+    )
+    p.add_argument(
         "--trace",
         action="store_true",
         help="print a token/cost/latency trace summary after the run",
@@ -91,41 +96,54 @@ async def _agent(
     interactive_approval: bool = False,
     trace: bool = False,
     langfuse: bool = False,
+    multi: bool = False,
 ) -> None:
     from pathlib import Path
 
-    from researchops.agent.runner import run_agent
+    from researchops.agent.runner import run_agent, run_multi_agent
     from researchops.agent.tools import build_default_tools
     from researchops.db.store import ExperimentStore
     from researchops.labops import LabClient, SshConnection
+    from researchops.memory import SqliteMemoryStore
     from researchops.rag.retriever import Retriever
 
     llm = build_llm()
     retriever = Retriever()
     lab_client = LabClient(SshConnection())
     store = ExperimentStore()
+    memory = SqliteMemoryStore()
     approver = _interactive_approver if interactive_approval else None
     registry = await build_default_tools(
-        retriever, lab_client, approver=approver, store=store
+        retriever, lab_client, approver=approver, store=store, memory=memory
     )
     run_trace = None
-    use_trace = trace or langfuse
+    final_report = ""
     try:
         Path(".researchops").mkdir(exist_ok=True)  # noqa: ASYNC240  # one-time startup, not hot-path I/O
         await store.init()
-        if use_trace:
-            from researchops.observability.trace import traced_run_agent
-
-            state, run_trace = await traced_run_agent(
+        if multi:
+            multi_state = await run_multi_agent(
                 task, llm=llm, registry=registry, max_iterations=max_iterations
             )
+            final_report = multi_state.final_report
+        elif trace or langfuse:
+            from researchops.observability.trace import traced_run_agent
+
+            traced_state, run_trace = await traced_run_agent(
+                task, llm=llm, registry=registry, max_iterations=max_iterations
+            )
+            final_report = traced_state.final_report
         else:
-            state = await run_agent(task, llm=llm, registry=registry, max_iterations=max_iterations)
+            single_state = await run_agent(
+                task, llm=llm, registry=registry, max_iterations=max_iterations
+            )
+            final_report = single_state.final_report
     finally:
         await retriever.close()
         await lab_client.close()
         await store.close()
-    print(state.final_report)
+        await memory.close()
+    print(final_report)
     if trace and run_trace is not None:
         import json
 
@@ -171,6 +189,7 @@ def main() -> None:
                 args.interactive_approval,
                 args.trace,
                 args.langfuse,
+                args.multi,
             )
         )
     else:

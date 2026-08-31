@@ -148,6 +148,7 @@ async def agent_stream(req: AgentRunRequest) -> StreamingResponse:
         from researchops.agent.tools import build_default_tools
         from researchops.db.store import ExperimentStore
         from researchops.mcp.client import LabopsMCPClient
+        from researchops.memory import SqliteMemoryStore
         from researchops.observability.langfuse import build_client, export_trace, is_configured
         from researchops.observability.trace import Trace, TracedLLM, TracedToolRegistry
         from researchops.rag.retriever import Retriever
@@ -157,6 +158,7 @@ async def agent_stream(req: AgentRunRequest) -> StreamingResponse:
         labops = LabopsMCPClient(settings)
         await labops.start()
         store = ExperimentStore()
+        memory = SqliteMemoryStore()
 
         # The agent stream and the approval events share one queue: a producer task
         # drains ``stream_agent`` while the (async) approver injects ``pending_approval``
@@ -186,7 +188,7 @@ async def agent_stream(req: AgentRunRequest) -> StreamingResponse:
                 _PENDING_APPROVALS.pop(request_id, None)
 
         registry = await build_default_tools(
-            retriever, labops, via_mcp=True, store=store, approver=approve
+            retriever, labops, via_mcp=True, store=store, approver=approve, memory=memory
         )
         trace = Trace(task=req.task)
         traced_llm: BaseLLM = TracedLLM(llm, trace)
@@ -235,6 +237,7 @@ async def agent_stream(req: AgentRunRequest) -> StreamingResponse:
             await retriever.close()
             await labops.close()
             await store.close()
+            await memory.close()
 
     return StreamingResponse(events(), media_type="text/event-stream")
 

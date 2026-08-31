@@ -18,6 +18,7 @@ from researchops.db.store import ExperimentStore
 from researchops.experiment import run_and_collect
 from researchops.labops import LabClient, RemoteLab
 from researchops.mcp.client import LabopsMCPClient, RemoteTool
+from researchops.memory import MemoryStore
 from researchops.rag.retriever import Retriever
 
 ToolHandler = Callable[..., Awaitable[str]]
@@ -48,6 +49,10 @@ class ToolRegistry:
 
     def names(self) -> list[str]:
         return sorted(self._tools)
+
+    def subset(self, names: Iterable[str]) -> ToolRegistry:
+        """A registry restricted to ``names`` — the tool surface of one specialist."""
+        return ToolRegistry([self._tools[name] for name in names])
 
     def schemas(self) -> list[dict[str, Any]]:
         """OpenAI function-calling schemas for every registered tool."""
@@ -133,11 +138,42 @@ def make_rag_search_tool(retriever: Retriever) -> Tool:
     )
 
 
+def make_memory_search_tool(memory: MemoryStore) -> Tool:
+    """Recall relevant past experiments/notes from long-term memory."""
+
+    async def handler(query: str, k: int = 5) -> str:
+        entries = await memory.recall(query, k=k)
+        if not entries:
+            return "No relevant past experiments or notes found in memory."
+        return "\n\n".join(
+            f"[{i}] ({e.kind}) {e.text}" for i, e in enumerate(entries, 1)
+        )
+
+    return Tool(
+        name="memory_search",
+        description=(
+            "Search the agent's long-term memory for past experiments, results, and "
+            "notes relevant to a query. Use it to reuse prior findings instead of "
+            "re-deriving them."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "what to recall"},
+                "k": {"type": "integer", "description": "number of entries", "default": 5},
+            },
+            "required": ["query"],
+        },
+        handler=handler,
+    )
+
+
 def make_labops_tools(
     client: LabClient,
     *,
     approver: Approver | None = None,
     store: ExperimentStore | None = None,
+    memory: MemoryStore | None = None,
 ) -> list[Tool]:
     """The remote-lab tools, each a thin text-serializing wrapper over LabClient.
 
@@ -255,13 +291,17 @@ def make_labops_tools(
     ]
 
     if store is not None:
-        tools.append(make_run_experiment_tool(client, store, approver=approver))
+        tools.append(make_run_experiment_tool(client, store, approver=approver, memory=memory))
 
     return tools
 
 
 def make_run_experiment_tool(
-    client: RemoteLab, store: ExperimentStore, *, approver: Approver | None = None
+    client: RemoteLab,
+    store: ExperimentStore,
+    *,
+    approver: Approver | None = None,
+    memory: MemoryStore | None = None,
 ) -> Tool:
     """One-shot tool wrapping the deterministic submit->poll->parse->persist pipeline.
 
@@ -292,6 +332,15 @@ def make_run_experiment_tool(
             {"name": m.name, "value": m.value, "dataset": m.dataset, "sigma": m.sigma}
             for m in outcome.metrics
         ]
+        if memory is not None:
+            metric_text = (
+                ", ".join(f"{m.name}@{m.sigma}={m.value}" for m in outcome.metrics)
+                or "no parsed metrics"
+            )
+            await memory.remember(
+                f"Experiment '{experiment_name}' (job {job_id}) {outcome.status}: {metric_text}",
+                kind="experiment",
+            )
         return _dump(
             {
                 "status": outcome.status,
@@ -382,6 +431,7 @@ async def make_mcp_labops_tools(
     *,
     approver: Approver | None = None,
     store: ExperimentStore | None = None,
+    memory: MemoryStore | None = None,
 ) -> list[Tool]:
     """Load the labops tools from the MCP server (instead of a direct ``LabClient``).
 
@@ -391,7 +441,7 @@ async def make_mcp_labops_tools(
     """
     tools = [_make_mcp_tool(mcp, rt, approver=approver) for rt in await mcp.list_tools()]
     if store is not None:
-        tools.append(make_run_experiment_tool(mcp, store, approver=approver))
+        tools.append(make_run_experiment_tool(mcp, store, approver=approver, memory=memory))
     return tools
 
 
@@ -402,23 +452,28 @@ async def build_default_tools(
     via_mcp: bool = False,
     approver: Approver | None = None,
     store: ExperimentStore | None = None,
+    memory: MemoryStore | None = None,
 ) -> ToolRegistry:
-    """Wire the full toolset: paper retrieval + remote-lab orchestration.
+    """Wire the full toolset: paper retrieval + remote-lab orchestration (+ memory).
 
     With ``via_mcp``, the remote-lab primitives are loaded over the MCP protocol from a
     running ``LabopsMCPClient``; otherwise they are built directly from a ``LabClient``
-    (the transport-agnostic fallback, still used by the CLI and unit tests).
+    (the transport-agnostic fallback, still used by the CLI and unit tests). When a
+    ``memory`` store is supplied, a ``memory_search`` tool is added so the agent can
+    recall past experiments/notes.
     """
     registry = ToolRegistry()
     registry.register(make_rag_search_tool(retriever))
+    if memory is not None:
+        registry.register(make_memory_search_tool(memory))
     if via_mcp:
         if not isinstance(labops, LabopsMCPClient):
             raise TypeError("via_mcp=True requires a LabopsMCPClient")
-        for tool in await make_mcp_labops_tools(labops, approver=approver, store=store):
+        for tool in await make_mcp_labops_tools(labops, approver=approver, store=store, memory=memory):
             registry.register(tool)
     else:
         if not isinstance(labops, LabClient):
             raise TypeError("via_mcp=False requires a LabClient")
-        for tool in make_labops_tools(labops, approver=approver, store=store):
+        for tool in make_labops_tools(labops, approver=approver, store=store, memory=memory):
             registry.register(tool)
     return registry
