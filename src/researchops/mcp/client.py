@@ -55,7 +55,7 @@ class LabopsMCPClient:
         self._session: ClientSession | None = None
 
     async def start(self) -> None:
-        """Launch the server subprocess and open the session."""
+        """Launch the server subprocess, open the session, and run the MCP handshake."""
         params = StdioServerParameters(
             command=sys.executable,
             args=["-m", "researchops.mcp"],
@@ -65,6 +65,10 @@ class LabopsMCPClient:
         read, write = await self._ctx.__aenter__()
         self._session = ClientSession(read, write)
         await self._session.__aenter__()
+        # The MCP 2.x ClientSession no longer runs `initialize` on enter; the
+        # handshake is explicit. Without it the server rejects the first
+        # `tools/list` with "Invalid request parameters".
+        await self._session.initialize()
 
     async def close(self) -> None:
         """Tear down the session and terminate the subprocess (idempotent)."""
