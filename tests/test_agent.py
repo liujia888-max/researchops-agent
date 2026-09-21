@@ -14,6 +14,7 @@ from researchops.agent.tools import Tool, ToolRegistry, make_labops_tools
 from researchops.db.store import ExperimentStore
 from researchops.labops.schemas import JobHandle, JobStatus
 from researchops.llm.providers import ChatResponse, ToolCall
+from researchops.memory import SqliteMemoryStore
 
 
 class FakeLLM:
@@ -485,3 +486,73 @@ async def test_run_agent_without_reflection_skips_reflector() -> None:
 
     assert state.final_report == "draft report"
     assert llm.calls == 4  # planner + executor x2 + reporter (no reflector)
+
+
+# --------------------------------------------------------------------------- #
+# Long-term memory: auto-recall at plan time + auto-remember at report time
+# --------------------------------------------------------------------------- #
+class _CapturingLLM:
+    """Pops scripted responses and records every message list it sees."""
+
+    def __init__(self, responses: list[ChatResponse]) -> None:
+        self._responses = list(responses)
+        self.seen: list[list[Any]] = []
+
+    async def chat(self, messages: list[Any], **kwargs: Any) -> ChatResponse:
+        self.seen.append(list(messages))
+        return self._responses.pop(0)
+
+
+async def test_run_agent_autorecalls_and_autoremembers(tmp_path: Path) -> None:
+    """Relevant past entries are injected at plan time, and the final report is
+    auto-persisted back to memory for the next run."""
+    store = SqliteMemoryStore(str(tmp_path / "memory.db"))
+    await store.remember("Restormer CBSD68 sigma=25 PSNR 31.79", kind="experiment")
+
+    registry = ToolRegistry([_make_tool("rag_search", "[1] (restormer p7) PSNR 31.79")])
+    llm = _CapturingLLM(
+        [
+            ChatResponse(content="- recall past results\n- report\n", model="fake"),
+            _tool_call("rag_search", {"query": "Restormer"}),
+            ChatResponse(content="done", model="fake"),
+            ChatResponse(content="final report: 31.79 dB", model="fake"),
+        ]
+    )
+
+    state = await run_agent(
+        "What is Restormer PSNR on CBSD68?",
+        llm=llm,  # type: ignore[arg-type]
+        registry=registry,
+        memory=store,
+    )
+
+    # The planner's user message carried the recalled past entry.
+    planner_user = llm.seen[0][1].content
+    assert "31.79" in planner_user
+    assert state.memories == ["Restormer CBSD68 sigma=25 PSNR 31.79"]
+
+    # The final report was auto-persisted (in addition to the seed entry).
+    assert state.memorized is True
+    entries = await store.list_entries()
+    assert len(entries) == 2
+    assert any("final report" in e.text for e in entries)
+    await store.close()
+
+
+async def test_run_agent_memory_is_optional_noop(tmp_path: Path) -> None:
+    """Without a memory store the same graph runs, with nothing recalled or written."""
+    registry = ToolRegistry([_make_tool("t", "evidence")])
+    llm = FakeLLM(
+        [
+            ChatResponse(content="- step\n", model="fake"),
+            _tool_call("t", {}),
+            ChatResponse(content="done", model="fake"),
+            ChatResponse(content="final", model="fake"),
+        ]
+    )
+
+    state = await run_agent("task", llm=llm, registry=registry)
+
+    assert state.memories == []
+    assert state.memorized is False
+    assert state.final_report == "final"

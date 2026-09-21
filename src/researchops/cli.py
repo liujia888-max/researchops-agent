@@ -128,23 +128,23 @@ async def _agent(
                 from researchops.observability.trace import traced_run_multi_agent
 
                 multi_state, run_trace = await traced_run_multi_agent(
-                    task, llm=llm, registry=registry, max_iterations=max_iterations
+                    task, llm=llm, registry=registry, max_iterations=max_iterations, memory=memory
                 )
             else:
                 multi_state = await run_multi_agent(
-                    task, llm=llm, registry=registry, max_iterations=max_iterations
+                    task, llm=llm, registry=registry, max_iterations=max_iterations, memory=memory
                 )
             final_report = multi_state.final_report
         elif trace or langfuse:
             from researchops.observability.trace import traced_run_agent
 
             traced_state, run_trace = await traced_run_agent(
-                task, llm=llm, registry=registry, max_iterations=max_iterations
+                task, llm=llm, registry=registry, max_iterations=max_iterations, memory=memory
             )
             final_report = traced_state.final_report
         else:
             single_state = await run_agent(
-                task, llm=llm, registry=registry, max_iterations=max_iterations
+                task, llm=llm, registry=registry, max_iterations=max_iterations, memory=memory
             )
             final_report = single_state.final_report
     finally:

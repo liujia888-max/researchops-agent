@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from researchops.agent.state import ToolResult
 from researchops.agent.tools import ToolRegistry
 from researchops.llm.providers import BaseLLM, ChatMessage
+from researchops.memory import MemoryStore
 
 # Tool surface each specialist is allowed to touch. ``run_specialist`` filters these
 # against the actually-registered tools, so a specialist silently skips any tool that
@@ -117,6 +118,8 @@ class MultiAgentState(BaseModel):
     summaries: dict[str, str] = field(default_factory=dict)
     final_report: str = ""
     max_iterations: int = 10
+    memories: list[str] = field(default_factory=list)
+    memorized: bool = False
 
 
 async def run_specialist(
@@ -193,8 +196,13 @@ def build_multi_agent(
     max_iterations: int = 10,
     max_retries: int = 2,
     retry_backoff_s: float = 1.0,
+    memory: MemoryStore | None = None,
 ) -> Any:
-    """Compile the supervisor -> (researcher | labops) -> reporter graph."""
+    """Compile the supervisor -> (researcher | labops) -> reporter graph.
+
+    With a ``memory`` store, the supervisor auto-recalls relevant past entries and a
+    terminal ``memorize`` node persists the final report back for later runs.
+    """
 
     specialist_configs = {
         "researcher": (RESEARCHER_PROMPT, RESEARCHER_TOOLS),
@@ -202,27 +210,44 @@ def build_multi_agent(
     }
 
     async def supervisor(state: MultiAgentState) -> dict[str, Any]:
+        recalled = await memory.recall(state.task, k=5) if memory is not None else []
+        context = "\n".join(f"- [{e.kind}] {e.text}" for e in recalled) or "(no relevant past work)"
+        user = (
+            f"Task: {state.task}\n\n"
+            f"Relevant past work from long-term memory (reuse if applicable):\n{context}"
+        )
         resp = await llm.chat(
             [
                 ChatMessage(role="system", content=SUPERVISOR_PROMPT),
-                ChatMessage(role="user", content=state.task),
+                ChatMessage(role="user", content=user),
             ],
             temperature=0.0,
             max_tokens=512,
         )
         roles, briefs = _parse_supervisor(resp.content)
         plan = [f"{r}: {briefs.get(r, '')}".strip() for r in roles]
-        return {"roles": roles, "briefs": briefs, "plan": plan}
+        return {
+            "roles": roles,
+            "briefs": briefs,
+            "plan": plan,
+            "memories": [e.text for e in recalled],
+        }
 
     async def workers(state: MultiAgentState) -> dict[str, Any]:
         async def run(role: str) -> SpecialistResult:
             system_prompt, tool_names = specialist_configs[role]
+            task = state.task
+            if role == "researcher" and state.memories:
+                task = (
+                    f"{task}\n\nRelevant past work from memory:\n"
+                    + "\n".join(f"- {m}" for m in state.memories)
+                )
             return await run_specialist(
                 llm,
                 registry,
                 role=role,
                 system_prompt=system_prompt,
-                task=state.task,
+                task=task,
                 brief=state.briefs.get(role, ""),
                 tool_names=tool_names,
                 max_iterations=state.max_iterations,
@@ -253,12 +278,24 @@ def build_multi_agent(
         )
         return {"final_report": resp.content}
 
+    async def memorize(state: MultiAgentState) -> dict[str, Any]:
+        """Persist the final report back to long-term memory (no-op without a store)."""
+        saved = memory is not None and bool(state.final_report)
+        if saved:
+            await memory.remember(
+                f"Task: {state.task}\nResult: {state.final_report}"[:4000],
+                kind="note",
+            )
+        return {"memorized": saved}
+
     graph = StateGraph(MultiAgentState)
     graph.add_node("supervisor", supervisor)
     graph.add_node("workers", workers)
     graph.add_node("reporter", reporter)
+    graph.add_node("memorize", memorize)
     graph.add_edge(START, "supervisor")
     graph.add_edge("supervisor", "workers")
     graph.add_edge("workers", "reporter")
-    graph.add_edge("reporter", END)
+    graph.add_edge("reporter", "memorize")
+    graph.add_edge("memorize", END)
     return graph.compile()

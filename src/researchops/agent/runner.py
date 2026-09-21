@@ -7,6 +7,7 @@ from researchops.agent.multi import MultiAgentState, build_multi_agent
 from researchops.agent.state import AgentState
 from researchops.agent.tools import ToolRegistry
 from researchops.llm.providers import BaseLLM
+from researchops.memory import MemoryStore
 
 
 async def run_agent(
@@ -18,6 +19,7 @@ async def run_agent(
     max_retries: int = 2,
     retry_backoff_s: float = 1.0,
     reflect: bool = False,
+    memory: MemoryStore | None = None,
 ) -> AgentState:
     """Run the agent on a task and return the final state (incl. ``final_report``)."""
     app = build_agent(
@@ -27,6 +29,7 @@ async def run_agent(
         max_retries=max_retries,
         retry_backoff_s=retry_backoff_s,
         reflect=reflect,
+        memory=memory,
     )
     result = await app.ainvoke(AgentState(task=task, max_iterations=max_iterations))
     if isinstance(result, AgentState):
@@ -42,6 +45,7 @@ async def run_multi_agent(
     max_iterations: int = 10,
     max_retries: int = 2,
     retry_backoff_s: float = 1.0,
+    memory: MemoryStore | None = None,
 ) -> MultiAgentState:
     """Run the supervisor + specialists team and return the final state."""
     app = build_multi_agent(
@@ -50,6 +54,7 @@ async def run_multi_agent(
         max_iterations=max_iterations,
         max_retries=max_retries,
         retry_backoff_s=retry_backoff_s,
+        memory=memory,
     )
     result = await app.ainvoke(MultiAgentState(task=task, max_iterations=max_iterations))
     if isinstance(result, MultiAgentState):

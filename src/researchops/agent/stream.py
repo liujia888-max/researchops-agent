@@ -26,6 +26,7 @@ from researchops.agent.multi import MultiAgentState, build_multi_agent
 from researchops.agent.state import AgentState
 from researchops.agent.tools import ToolRegistry
 from researchops.llm.providers import BaseLLM
+from researchops.memory import MemoryStore
 
 
 async def stream_agent(
@@ -37,6 +38,7 @@ async def stream_agent(
     max_retries: int = 2,
     retry_backoff_s: float = 1.0,
     reflect: bool = False,
+    memory: MemoryStore | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Run the agent, yielding one event per graph node transition."""
     app = build_agent(
@@ -46,13 +48,18 @@ async def stream_agent(
         max_retries=max_retries,
         retry_backoff_s=retry_backoff_s,
         reflect=reflect,
+        memory=memory,
     )
     initial = AgentState(task=task, max_iterations=max_iterations)
 
     async for chunk in app.astream(initial, stream_mode="updates"):
         for node, update in chunk.items():
             if node == "planner":
-                yield {"event": "plan", "plan": list(update.get("plan") or [])}
+                yield {
+                    "event": "plan",
+                    "plan": list(update.get("plan") or []),
+                    "memories": list(update.get("memories") or []),
+                }
             elif node == "executor":
                 pending = update.get("pending_tool")
                 if pending:
@@ -79,6 +86,9 @@ async def stream_agent(
                     "report": update.get("final_report", ""),
                     "revised": True,
                 }
+            elif node == "memorize":
+                if update.get("memorized"):
+                    yield {"event": "memory", "saved": True}
 
 
 async def stream_multi_agent(
@@ -89,6 +99,7 @@ async def stream_multi_agent(
     max_iterations: int = 10,
     max_retries: int = 2,
     retry_backoff_s: float = 1.0,
+    memory: MemoryStore | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Run the supervisor + specialists team, yielding one event per graph node.
 
@@ -103,6 +114,7 @@ async def stream_multi_agent(
         max_iterations=max_iterations,
         max_retries=max_retries,
         retry_backoff_s=retry_backoff_s,
+        memory=memory,
     )
     initial = MultiAgentState(task=task, max_iterations=max_iterations)
 
@@ -113,6 +125,7 @@ async def stream_multi_agent(
                     "event": "supervisor",
                     "roles": list(update.get("roles") or []),
                     "plan": list(update.get("plan") or []),
+                    "memories": list(update.get("memories") or []),
                 }
             elif node == "workers":
                 findings = update.get("findings") or {}
@@ -130,3 +143,6 @@ async def stream_multi_agent(
                 }
             elif node == "reporter":
                 yield {"event": "report", "report": update.get("final_report", "")}
+            elif node == "memorize":
+                if update.get("memorized"):
+                    yield {"event": "memory", "saved": True}

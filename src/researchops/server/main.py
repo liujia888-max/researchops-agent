@@ -206,6 +206,7 @@ async def agent_stream(req: AgentRunRequest) -> StreamingResponse:
                         llm=traced_llm,
                         registry=traced_registry,
                         max_iterations=req.max_iterations,
+                        memory=memory,
                     )
                 else:
                     streamer = stream_agent(
@@ -214,6 +215,7 @@ async def agent_stream(req: AgentRunRequest) -> StreamingResponse:
                         registry=traced_registry,
                         max_iterations=req.max_iterations,
                         reflect=req.reflect,
+                        memory=memory,
                     )
                 async for event in streamer:
                     queue.put_nowait(_sse(event))

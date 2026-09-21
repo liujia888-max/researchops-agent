@@ -36,6 +36,7 @@ from researchops.agent.state import AgentState
 from researchops.agent.tools import Tool, ToolRegistry
 from researchops.config import get_settings
 from researchops.llm.providers import BaseLLM, ChatMessage, ChatResponse
+from researchops.memory import MemoryStore
 
 
 def llm_prices() -> tuple[float, float]:
@@ -267,13 +268,18 @@ async def traced_run_agent(
     registry: ToolRegistry,
     max_iterations: int = 10,
     max_cost_usd: float | None = None,
+    memory: MemoryStore | None = None,
 ) -> tuple[AgentState, Trace]:
     """Run the agent with full tracing; return the final state and its trace."""
     trace = Trace(task=task, budget_usd=_resolve_budget(max_cost_usd))
     traced_llm: BaseLLM = TracedLLM(llm, trace)
     traced_registry: ToolRegistry = TracedToolRegistry(registry, trace)
     state = await run_agent(
-        task, llm=traced_llm, registry=traced_registry, max_iterations=max_iterations
+        task,
+        llm=traced_llm,
+        registry=traced_registry,
+        max_iterations=max_iterations,
+        memory=memory,
     )
     return state, trace
 
@@ -287,6 +293,7 @@ async def traced_run_multi_agent(
     max_retries: int = 2,
     retry_backoff_s: float = 1.0,
     max_cost_usd: float | None = None,
+    memory: MemoryStore | None = None,
 ) -> tuple[MultiAgentState, Trace]:
     """Run the multi-agent team with full tracing; return the final state and trace."""
     trace = Trace(task=task, budget_usd=_resolve_budget(max_cost_usd))
@@ -299,5 +306,6 @@ async def traced_run_multi_agent(
         max_iterations=max_iterations,
         max_retries=max_retries,
         retry_backoff_s=retry_backoff_s,
+        memory=memory,
     )
     return state, trace

@@ -40,3 +40,7 @@ class AgentState(BaseModel):
     pending_tool: dict[str, Any] | None = None
     finished: bool = False
     final_report: str = ""
+    # Long-term memory: recalled past entries injected at plan time, and whether this
+    # run's final report was auto-persisted back to memory.
+    memories: list[str] = Field(default_factory=list)
+    memorized: bool = False
