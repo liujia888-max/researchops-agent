@@ -6,9 +6,17 @@ or a git-ignored `.env` file (see `.env.example`).
 
 from __future__ import annotations
 
+import os as _os
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# httpx on Windows follows the WinINET system proxy (e.g. Clash) but ignores its
+# bypass list, so localhost services (Qdrant :6333, inference :8001) would be routed
+# through the proxy and come back as 502s whenever they're down. Pin NO_PROXY so
+# httpx always dials localhost directly; remote hosts still go through the proxy.
+_os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1")
+_os.environ.setdefault("no_proxy", "localhost,127.0.0.1")
 
 
 class Settings(BaseSettings):
@@ -51,7 +59,7 @@ class Settings(BaseSettings):
     # Phase 2 — labops MCP server: SSH to the GPU host for experiment orchestration.
     # Defaults point at the current AutoDL host; override via env for any other host.
     labops_host: str = "connect.westd.seetacloud.com"
-    labops_port: int = 22050
+    labops_port: int = 49830
     labops_user: str = "root"
     labops_key_path: str = "~/.ssh/id_rsa"
     # Remote working directory that jobs are sandboxed to.

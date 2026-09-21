@@ -106,3 +106,43 @@ async def test_build_default_tools_via_mcp_rejects_non_mcp() -> None:
 async def test_build_default_tools_direct_rejects_non_labclient() -> None:
     with pytest.raises(TypeError):
         await build_default_tools(_FakeRetriever(), object(), via_mcp=False)
+
+
+async def test_run_maps_labops_error_to_structured_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A labops failure (host down) becomes a readable {"error", "advice"} result
+    instead of crashing into an MCP traceback."""
+    from contextlib import asynccontextmanager
+
+    from researchops.labops.errors import HostUnreachableError
+    from researchops.mcp import server as mcp_server
+
+    @asynccontextmanager
+    async def fake_client():
+        yield object()
+
+    async def op(client: Any) -> list[dict[str, Any]]:
+        raise HostUnreachableError("cannot reach root@host:1 — connection refused")
+
+    monkeypatch.setattr(mcp_server, "_client", fake_client)
+    result = await mcp_server._run(op)
+
+    assert isinstance(result, dict)
+    assert "connection refused" in result["error"]
+    assert "powered on" in result["advice"]
+
+
+async def test_run_passes_through_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A successful operation's result is returned untouched."""
+    from contextlib import asynccontextmanager
+
+    from researchops.mcp import server as mcp_server
+
+    @asynccontextmanager
+    async def fake_client():
+        yield object()
+
+    async def op(client: Any) -> str:
+        return "ok"
+
+    monkeypatch.setattr(mcp_server, "_client", fake_client)
+    assert await mcp_server._run(op) == "ok"

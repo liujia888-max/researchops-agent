@@ -191,6 +191,37 @@ def make_memory_search_tool(memory: MemoryStore) -> Tool:
     )
 
 
+def make_list_local_experiments_tool(store: ExperimentStore) -> Tool:
+    """List experiments persisted in the *local* database (name, task, run statuses).
+
+    Unlike the labops ``list_experiments`` (which lists the remote GPU host's working
+    directory), this one reads the local ExperimentStore, so past runs stay visible
+    even when the remote host is unreachable.
+    """
+
+    async def handler() -> str:
+        await store.init()  # idempotent; safe even if the caller already did
+        experiments = await store.list_experiments()
+        if not experiments:
+            return "No experiments persisted locally yet."
+        lines = []
+        for exp in experiments:
+            runs = await store.list_runs(exp.id)
+            statuses = ", ".join(sorted({r.status for r in runs})) if runs else "none"
+            lines.append(f"- {exp.name} (task: {exp.task or '-'}, runs: {len(runs)} [{statuses}])")
+        return "\n".join(lines)
+
+    return Tool(
+        name="list_local_experiments",
+        description=(
+            "List experiments persisted in the local database (name, task, run statuses). "
+            "Use it to recall what has already been run locally; works offline."
+        ),
+        parameters={"type": "object", "properties": {}, "required": []},
+        handler=handler,
+    )
+
+
 def make_labops_tools(
     client: LabClient,
     *,
@@ -499,6 +530,8 @@ async def build_default_tools(
     registry.register(make_rag_search_tool(retriever))
     if memory is not None:
         registry.register(make_memory_search_tool(memory))
+    if store is not None:
+        registry.register(make_list_local_experiments_tool(store))
     if via_mcp:
         if not isinstance(labops, LabopsMCPClient):
             raise TypeError("via_mcp=True requires a LabopsMCPClient")

@@ -281,12 +281,13 @@ def build_agent(
 
     async def memorize(state: AgentState) -> dict[str, Any]:
         """Persist the final report back to long-term memory (no-op without a store)."""
-        saved = memory is not None and bool(state.final_report)
-        if saved:
+        saved = False
+        if memory is not None and state.final_report:
             await memory.remember(
                 f"Task: {state.task}\nResult: {state.final_report}"[:4000],
                 kind="note",
             )
+            saved = True
         return {"memorized": saved}
 
     def route_executor(state: AgentState) -> str:

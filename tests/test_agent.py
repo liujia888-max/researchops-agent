@@ -556,3 +556,32 @@ async def test_run_agent_memory_is_optional_noop(tmp_path: Path) -> None:
     assert state.memories == []
     assert state.memorized is False
     assert state.final_report == "final"
+
+
+# --------------------------------------------------------------------------- #
+# list_local_experiments (offline view of the persisted experiment DB)
+# --------------------------------------------------------------------------- #
+async def test_list_local_experiments_tool_reads_store() -> None:
+    """The local-store tool lists persisted experiments even with no GPU host."""
+    from researchops.agent.tools import make_list_local_experiments_tool
+
+    store = ExperimentStore(url="sqlite+aiosqlite:///:memory:")
+    await store.init()
+    exp = await store.get_or_create_experiment("restormer-repro", "reproduce Restormer")
+    await store.create_run(exp.id, "j1", "python eval.py")
+
+    out = await make_list_local_experiments_tool(store).handler()
+
+    assert "restormer-repro" in out
+    assert "runs: 1" in out
+    assert "submitted" in out
+    await store.close()
+
+
+async def test_list_local_experiments_tool_empty_store() -> None:
+    from researchops.agent.tools import make_list_local_experiments_tool
+
+    store = ExperimentStore(url="sqlite+aiosqlite:///:memory:")
+    out = await make_list_local_experiments_tool(store).handler()
+    assert "No experiments persisted" in out
+    await store.close()

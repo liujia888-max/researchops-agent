@@ -48,20 +48,26 @@ class Retriever:
             )
 
         # Hybrid query: dense + sparse branches fused by RRF inside Qdrant.
-        result = await self._client.query_points(
-            collection_name=self._store.collection,
-            prefetch=[
-                models.Prefetch(query=dense, using="dense", limit=top_k),
-                models.Prefetch(
-                    query=models.SparseVector(indices=sparse_idx, values=sparse_val),
-                    using="sparse",
-                    limit=top_k,
-                ),
-            ],
-            query=models.FusionQuery(fusion=models.Fusion.RRF),
-            limit=top_k,
-            query_filter=query_filter,
-        )
+        try:
+            result = await self._client.query_points(
+                collection_name=self._store.collection,
+                prefetch=[
+                    models.Prefetch(query=dense, using="dense", limit=top_k),
+                    models.Prefetch(
+                        query=models.SparseVector(indices=sparse_idx, values=sparse_val),
+                        using="sparse",
+                        limit=top_k,
+                    ),
+                ],
+                query=models.FusionQuery(fusion=models.Fusion.RRF),
+                limit=top_k,
+                query_filter=query_filter,
+            )
+        except Exception as exc:  # noqa: BLE001 — surface a readable, actionable tool error
+            raise RuntimeError(
+                f"Qdrant unreachable at {self._settings.qdrant_url} ({exc}). "
+                "Start Qdrant first (docs/USAGE.md) or set QDRANT_URL to a running instance."
+            ) from exc
 
         return [_point_to_chunk(p) for p in result.points]
 

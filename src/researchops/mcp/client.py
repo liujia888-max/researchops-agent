@@ -99,7 +99,9 @@ class LabopsMCPClient:
         result = await self._require_session().call_tool(name, arguments or {})
         text = _content_text(result)
         if result.is_error:
-            raise RuntimeError(text or f"labops MCP tool {name!r} failed")
+            # Cap the message: an unexpected server crash would otherwise flood the
+            # agent's context with a full traceback.
+            raise RuntimeError((text or f"labops MCP tool {name!r} failed")[:500])
         return text
 
     # -- RemoteLab protocol ------------------------------------------------ #

@@ -109,6 +109,19 @@ NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000 npm run dev
 
 网页端支持**直接上传文档入库**：点击「文档库」面板的上传按钮，选择 PDF / Word(.docx) / txt / md 文件，上传后即解析→分块→向量化→入库 Qdrant，成为 Agent `rag_search` 的检索语料。也提供 `POST /documents`（multipart 上传）和 `GET /documents`（列出已入库文档）两个 REST 接口。
 
+## Windows 无 Docker：本地起 Qdrant（可选）
+
+不想装 Docker 时，Qdrant 可直接跑原生二进制（v1.19+ 提供 Windows 版）：
+
+1. 下载 `qdrant-x86_64-pc-windows-msvc.exe`，运行 `.\qdrant.exe --disable-telemetry`（数据落在当前目录 `./storage`）。
+2. `QDRANT_URL` 默认 `http://127.0.0.1:6333`，无需改配置。
+
+> **Windows 系统代理坑（实测踩过）**：开着 Clash 等系统代理时，httpx 会跟随
+> WinINET 代理设置，却**忽略本地回环的绕过列表**——localhost 流量（Qdrant :6333、
+> 推理服务 :8001）被错误转发到代理，服务一停就表现为 `502 Bad Gateway`（空响应体）。
+> config.py 已在模块加载时固定 `NO_PROXY=localhost,127.0.0.1` 规避；自己在脚本里
+> 单独用 httpx 时记得同样设置。
+
 ## 别人用 Docker 起全套（可选）
 
 ```bash
