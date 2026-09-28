@@ -32,7 +32,8 @@ dependencies = [
     # Agent runtime: LangGraph state machine (Planner -> Executor -> Tools -> Reporter).
     "langgraph>=1.0",
     # Persistence: experiment/job/metric records (SQLAlchemy 2.0 async).
-    "sqlalchemy>=2.0",
+    # The [asyncio] extra carries greenlet, which the async engine requires.
+    "sqlalchemy[asyncio]>=2.0",
     "aiosqlite>=0.19",
 ]
 
