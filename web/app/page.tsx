@@ -54,6 +54,34 @@ type PendingApproval = {
   arguments: unknown;
 };
 
+// Chat-message model: every turn (live run or recalled history) is one user bubble
+// plus one assistant bubble, so the conversation reads like ChatGPT/DeepSeek.
+type UserMsg = { id: string; role: "user"; content: string; at: string };
+
+type AssistantMsg = {
+  id: string;
+  role: "assistant";
+  at: string;
+  status: "running" | "done" | "error";
+  steps: Step[];
+  report: string;
+  error: string;
+  trace: TraceSummary | null;
+  langfuseUrl: string;
+};
+
+type ChatMsg = UserMsg | AssistantMsg;
+
+function now(): string {
+  return new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+}
+
+function fmtIso(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 16).replace("T", " ");
+  return d.toLocaleString("zh-CN", { hour12: false });
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -156,16 +184,86 @@ function StepView({ step }: { step: Step }) {
   );
 }
 
+function TraceCard({ trace, langfuseUrl }: { trace: TraceSummary; langfuseUrl: string }) {
+  return (
+    <div className="trace-card">
+      <div className="trace-grid">
+        <div className="cell">
+          <div className="k">LLM 调用</div>
+          <div className="v">{trace.llm_calls ?? "-"}</div>
+        </div>
+        <div className="cell">
+          <div className="k">工具调用</div>
+          <div className="v">{trace.tool_calls ?? "-"}</div>
+        </div>
+        <div className="cell">
+          <div className="k">总 Token</div>
+          <div className="v">{trace.total_tokens ?? "-"}</div>
+        </div>
+        <div className="cell">
+          <div className="k">成本</div>
+          <div className="v">${(trace.cost_usd ?? 0).toFixed(4)}</div>
+        </div>
+      </div>
+      {langfuseUrl && (
+        <p className="muted" style={{ marginTop: 10 }}>
+          <a href={langfuseUrl} target="_blank" rel="noreferrer">
+            在 Langfuse 查看完整 trace →
+          </a>
+        </p>
+      )}
+    </div>
+  );
+}
+
+function UserBubble({ msg }: { msg: UserMsg }) {
+  return (
+    <div className="msg user">
+      <div className="bubble">
+        <div className="meta">{msg.at}</div>
+        {msg.content}
+      </div>
+      <div className="avatar">我</div>
+    </div>
+  );
+}
+
+function AssistantBubble({ msg }: { msg: AssistantMsg }) {
+  const toolCalls = msg.steps.filter((s) => s.kind === "tool_call").length;
+  return (
+    <div className="msg assistant">
+      <div className="avatar">🤖</div>
+      <div className="bubble">
+        <div className="meta">ResearchOps Agent · {msg.at}</div>
+        {msg.steps.length > 0 && (
+          <details className="steps-box" open={msg.status === "running"}>
+            <summary>执行过程 · {toolCalls} 次工具调用</summary>
+            {msg.steps.map((s, i) => (
+              <StepView key={i} step={s} />
+            ))}
+          </details>
+        )}
+        {msg.report ? (
+          <div className="report" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.report) }} />
+        ) : msg.status === "running" ? (
+          <div className="typing">
+            <span className="spinner" />
+            {msg.steps.length === 0 ? "正在规划…" : "正在检索 / 执行，稍候…"}
+          </div>
+        ) : null}
+        {msg.error && <div className="error">{msg.error}</div>}
+        {msg.trace && <TraceCard trace={msg.trace} langfuseUrl={msg.langfuseUrl} />}
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [task, setTask] = useState("");
   const [maxIterations, setMaxIterations] = useState(10);
   const [langfuse, setLangfuse] = useState(false);
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [running, setRunning] = useState(false);
-  const [steps, setSteps] = useState<Step[]>([]);
-  const [report, setReport] = useState("");
-  const [trace, setTrace] = useState<TraceSummary | null>(null);
-  const [langfuseUrl, setLangfuseUrl] = useState("");
-  const [error, setError] = useState("");
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [memories, setMemories] = useState<MemoryItem[]>([]);
   const [documents, setDocuments] = useState<Doc[]>([]);
@@ -175,13 +273,35 @@ export default function Home() {
 
   // Auto-follow the stream only while the user is already at the bottom; a manual
   // scroll up disables it so reading isn't yanked back down mid-generation.
-  const outputRef = useRef<HTMLDivElement>(null);
+  const chatRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
+  const idSeq = useRef(0);
+  // The assistant bubble the SSE stream is currently writing into (by id, so a
+  // history click mid-run can't redirect events into the wrong bubble).
+  const activeId = useRef<string | null>(null);
 
-  function onOutputScroll() {
-    const el = outputRef.current;
+  function onChatScroll() {
+    const el = chatRef.current;
     if (!el) return;
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }
+
+  useEffect(() => {
+    if (stickToBottom.current && chatRef.current) {
+      chatRef.current.scrollTop = chatRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  function pushMessages(add: ChatMsg[]) {
+    setMessages((ms) => [...ms, ...add]);
+  }
+
+  function updateActive(updater: (m: AssistantMsg) => AssistantMsg) {
+    setMessages((ms) =>
+      ms.map((m) =>
+        m.role === "assistant" && m.id === activeId.current ? updater(m) : m
+      )
+    );
   }
 
   async function refreshExperiments() {
@@ -216,12 +336,6 @@ export default function Home() {
     refreshDocuments();
     refreshMemories();
   }, []);
-
-  useEffect(() => {
-    if (stickToBottom.current && outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight;
-    }
-  }, [steps, report, trace]);
 
   async function uploadFiles(files: FileList | null) {
     if (!files || files.length === 0 || uploading) return;
@@ -274,25 +388,61 @@ export default function Home() {
     }
   }
 
-  async function run() {
-    if (!task.trim() || running) return;
-    setRunning(true);
-    setError("");
-    setSteps([]);
-    setReport("");
-    setTrace(null);
-    setLangfuseUrl("");
+  // Replay a stored Q&A into the conversation area as a user bubble + answer
+  // bubble, and also backfill the composer so the question can be followed up.
+  function loadMemory(m: MemoryItem) {
+    const report = m.result || "（这条记忆只保存了问题，没有报告内容）";
+    setTask(m.task);
     stickToBottom.current = true;
+    pushMessages([
+      { id: `u${++idSeq.current}`, role: "user", content: m.task, at: fmtIso(m.created_at) },
+      {
+        id: `a${++idSeq.current}`,
+        role: "assistant",
+        at: fmtIso(m.created_at),
+        status: "done",
+        steps: [],
+        report,
+        error: "",
+        trace: null,
+        langfuseUrl: "",
+      },
+    ]);
+  }
+
+  async function run() {
+    const question = task.trim();
+    if (!question || running) return;
+    setRunning(true);
+    setTask("");
+    stickToBottom.current = true;
+
+    const uid = `u${++idSeq.current}`;
+    const aid = `a${++idSeq.current}`;
+    activeId.current = aid;
+    pushMessages([
+      { id: uid, role: "user", content: question, at: now() },
+      {
+        id: aid,
+        role: "assistant",
+        at: now(),
+        status: "running",
+        steps: [],
+        report: "",
+        error: "",
+        trace: null,
+        langfuseUrl: "",
+      },
+    ]);
 
     try {
       const res = await fetch(`${API_BASE}/agent/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task, max_iterations: maxIterations, langfuse }),
+        body: JSON.stringify({ task: question, max_iterations: maxIterations, langfuse }),
       });
       if (!res.ok || !res.body) {
-        setError(`后端返回 ${res.status}`);
-        setRunning(false);
+        updateActive((m) => ({ ...m, status: "error", error: `后端返回 ${res.status}` }));
         return;
       }
 
@@ -320,8 +470,14 @@ export default function Home() {
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      updateActive((m) => ({
+        ...m,
+        status: "error",
+        error: e instanceof Error ? e.message : String(e),
+      }));
     } finally {
+      updateActive((m) => (m.status === "running" ? { ...m, status: "done" } : m));
+      activeId.current = null;
       setRunning(false);
       refreshExperiments();
       refreshMemories();
@@ -331,33 +487,39 @@ export default function Home() {
   function handleEvent(ev: Record<string, unknown>) {
     switch (ev.event) {
       case "plan":
-        setSteps((s) => [...s, { kind: "plan", plan: (ev.plan as string[]) ?? [] }]);
+        updateActive((m) => ({
+          ...m,
+          steps: [...m.steps, { kind: "plan", plan: (ev.plan as string[]) ?? [] }],
+        }));
         break;
       case "tool_call":
-        setSteps((s) => [
-          ...s,
-          { kind: "tool_call", name: ev.name as string, arguments: ev.arguments },
-        ]);
+        updateActive((m) => ({
+          ...m,
+          steps: [...m.steps, { kind: "tool_call", name: ev.name as string, arguments: ev.arguments }],
+        }));
         break;
       case "tool_result":
-        setSteps((s) => [
-          ...s,
-          {
-            kind: "tool_result",
-            name: ev.name as string,
-            arguments: ev.arguments,
-            output: ev.output as string,
-          },
-        ]);
+        updateActive((m) => ({
+          ...m,
+          steps: [
+            ...m.steps,
+            {
+              kind: "tool_result",
+              name: ev.name as string,
+              arguments: ev.arguments,
+              output: ev.output as string,
+            },
+          ],
+        }));
         break;
       case "report":
-        setReport(ev.report as string);
+        updateActive((m) => ({ ...m, report: ev.report as string, status: "done" }));
         break;
       case "trace":
-        setTrace(ev as unknown as TraceSummary);
+        updateActive((m) => ({ ...m, trace: ev as unknown as TraceSummary }));
         break;
       case "langfuse":
-        setLangfuseUrl(ev.url as string);
+        updateActive((m) => ({ ...m, langfuseUrl: ev.url as string }));
         break;
       case "pending_approval":
         setPending({
@@ -367,7 +529,10 @@ export default function Home() {
         });
         break;
       case "error":
-        setError(ev.message as string);
+        updateActive((m) => ({ ...m, status: "error", error: ev.message as string }));
+        break;
+      case "done":
+        updateActive((m) => ({ ...m, status: m.status === "error" ? "error" : "done" }));
         break;
     }
   }
@@ -458,7 +623,7 @@ export default function Home() {
                   <button
                     key={m.id}
                     className="memory-item"
-                    title={`${m.created_at.slice(0, 10)} · 点击载入到输入框`}
+                    title={`${fmtIso(m.created_at)} · 点击在对话区查看完整问答`}
                     style={{
                       display: "block",
                       width: "100%",
@@ -470,7 +635,7 @@ export default function Home() {
                       cursor: "pointer",
                       fontSize: 13,
                     }}
-                    onClick={() => setTask(m.task)}
+                    onClick={() => loadMemory(m)}
                   >
                     {m.task.length > 42 ? `${m.task.slice(0, 42)}…` : m.task}
                     <span className="muted" style={{ float: "right", fontSize: 11, marginLeft: 8 }}>
@@ -520,63 +685,24 @@ export default function Home() {
         </aside>
 
         <main className="main">
-          <div className="output" ref={outputRef} onScroll={onOutputScroll}>
-            {error && <div className="error">{error}</div>}
-
-            {steps.length > 0 && (
-              <div className="card">
-                {steps.map((s, i) => (
-                  <StepView key={i} step={s} />
-                ))}
-              </div>
-            )}
-
-            {report && (
-              <div className="card">
-                <div className="head" style={{ fontWeight: 600, marginBottom: 8 }}>
-                  最终报告
-                </div>
-                <div className="report" dangerouslySetInnerHTML={{ __html: renderMarkdown(report) }} />
-              </div>
-            )}
-
-            {trace && (
-              <div className="card">
-                <div className="head" style={{ fontWeight: 600, marginBottom: 10 }}>
-                  本次 Trace
-                </div>
-                <div className="trace-grid">
-                  <div className="cell">
-                    <div className="k">LLM 调用</div>
-                    <div className="v">{trace.llm_calls ?? "-"}</div>
-                  </div>
-                  <div className="cell">
-                    <div className="k">工具调用</div>
-                    <div className="v">{trace.tool_calls ?? "-"}</div>
-                  </div>
-                  <div className="cell">
-                    <div className="k">总 Token</div>
-                    <div className="v">{trace.total_tokens ?? "-"}</div>
-                  </div>
-                  <div className="cell">
-                    <div className="k">成本</div>
-                    <div className="v">${(trace.cost_usd ?? 0).toFixed(4)}</div>
-                  </div>
-                </div>
-                {langfuseUrl && (
-                  <p className="muted" style={{ marginTop: 10 }}>
-                    <a href={langfuseUrl} target="_blank" rel="noreferrer">
-                      在 Langfuse 查看完整 trace →
-                    </a>
-                  </p>
-                )}
-              </div>
-            )}
-
-            {!running && steps.length === 0 && !report && !error && (
+          <div className="chat" ref={chatRef} onScroll={onChatScroll}>
+            {messages.length === 0 ? (
               <div className="empty">
-                在下方输入一个科研任务，Agent 会自主检索 / 提交 / 出报告
+                <h2>👋 你好，我是 ResearchOps Agent</h2>
+                <p>一句话任务 → 自主检索 / 提交 / 出报告</p>
+                <p className="muted" style={{ marginTop: 8 }}>
+                  例如：复现 Restormer 的 Gaussian Color Blind 在 CBSD68 σ=25 上的结果，并和
+                  model_v3_rgb 对比，出报告
+                </p>
               </div>
+            ) : (
+              messages.map((m) =>
+                m.role === "user" ? (
+                  <UserBubble key={m.id} msg={m} />
+                ) : (
+                  <AssistantBubble key={m.id} msg={m} />
+                )
+              )
             )}
           </div>
 
@@ -584,7 +710,15 @@ export default function Home() {
             <textarea
               value={task}
               onChange={(e) => setTask(e.target.value)}
-              placeholder="例如：复现 Restormer 的 Gaussian Color Blind 在 CBSD68 σ=25 上的结果，并和 model_v3_rgb 对比，出报告"
+              onKeyDown={(e) => {
+                // Enter sends, Shift+Enter inserts a newline; isComposing guards the
+                // Chinese IME so confirming a candidate doesn't fire the run.
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  run();
+                }
+              }}
+              placeholder="输入科研任务，Enter 发送，Shift+Enter 换行"
             />
             <div className="row">
               <button className="btn" onClick={run} disabled={running || !task.trim()}>
@@ -593,7 +727,7 @@ export default function Home() {
                     <span className="spinner" /> 运行中…
                   </>
                 ) : (
-                  "开始"
+                  "发送"
                 )}
               </button>
               <label>
