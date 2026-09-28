@@ -109,6 +109,8 @@ NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000 npm run dev
 
 界面支持：ChatGPT / DeepSeek 式对话气泡——SSE 把计划、每次工具调用与最终报告实时流进同一轮对话（执行过程自动折叠）；「历史问答（记忆）」侧栏保存每一次问答，点击即可在对话区完整还原并可接着追问；每轮回答底部展示 Trace 的 token/成本，可勾选 Langfuse 追踪；侧栏另含文档库（上传/删除/入库）与历史实验列表。
 
+![对话界面](docs/screenshot.png)
+
 ## 架构
 
 ```
