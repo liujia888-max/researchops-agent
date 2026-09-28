@@ -312,6 +312,38 @@ async def experiments() -> list[dict[str, Any]]:
         await store.close()
 
 
+@app.get("/memory")
+async def memory_log() -> list[dict[str, Any]]:
+    """List the agent's long-term memory: tasks asked and reports saved (newest first)."""
+    from researchops.memory import SqliteMemoryStore
+
+    store = SqliteMemoryStore()
+    try:
+        entries = await store.list_entries()
+    finally:
+        await store.close()
+
+    result: list[dict[str, Any]] = []
+    for e in entries:
+        task, text = e.task, e.text
+        if not task and "\nResult: " in text:
+            # v1 rows stored "Task: <task>\nResult: <report>" as one blob; split for display.
+            head, _, text = text.partition("\nResult: ")
+            task = head.removeprefix("Task: ") if head.startswith("Task: ") else head
+        if not task:
+            task, text = text, ""
+        result.append(
+            {
+                "id": e.id,
+                "task": task,
+                "result": text,
+                "kind": e.kind,
+                "created_at": e.created_at,
+            }
+        )
+    return list(reversed(result))
+
+
 @app.post("/documents")
 async def upload_document(file: UploadFile = File(...)) -> dict[str, Any]:  # noqa: B008 — FastAPI upload idiom
     """Upload a document (pdf/docx/txt/md), ingest it into the RAG index.

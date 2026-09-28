@@ -86,3 +86,56 @@ async def test_list_entries_returns_all_in_order(tmp_path) -> None:
         assert entries[0].id < entries[1].id
     finally:
         await store.close()
+
+
+async def test_recall_matches_pure_chinese_via_bigrams(tmp_path) -> None:
+    """Chinese queries recall by character bigrams — no latin keyword required."""
+    store = SqliteMemoryStore(str(tmp_path / "memory.db"))
+    try:
+        await store.remember("图像去噪模型使用 MSE 与 SSIM 联合训练")
+        hits = await store.recall("图像去噪的损失函数是什么")
+        assert hits, "expected the Chinese entry to match via CJK bigrams"
+        assert "MSE" in hits[0].text
+    finally:
+        await store.close()
+
+
+async def test_remember_stores_task_column(tmp_path) -> None:
+    store = SqliteMemoryStore(str(tmp_path / "memory.db"))
+    try:
+        await store.remember("report text", task="复现 Restormer CBSD68")
+        entries = await store.list_entries()
+        assert entries[0].task == "复现 Restormer CBSD68"
+        assert entries[0].text == "report text"
+        # task words participate in recall even though the text lacks them
+        assert await store.recall("restormer") != []
+    finally:
+        await store.close()
+
+
+async def test_v1_database_is_migrated_in_place(tmp_path) -> None:
+    """A pre-v2 database (no task column) gains it on open and keeps recalling."""
+    import sqlite3
+
+    path = tmp_path / "memory.db"
+    db = sqlite3.connect(path)
+    db.execute(
+        "CREATE TABLE memories (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "text TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'note', created_at TEXT NOT NULL)"
+    )
+    db.execute(
+        "INSERT INTO memories (text, kind, created_at) "
+        "VALUES ('Task: old question\\nResult: old answer', 'note', '2026-01-01')"
+    )
+    db.commit()
+    db.close()
+
+    store = SqliteMemoryStore(str(path))
+    try:
+        await store.remember("new result", task="new question")
+        entries = await store.list_entries()
+        assert [e.task for e in entries] == ["", "new question"]
+        # the v1 blob is still recallable through its text
+        assert await store.recall("old question") != []
+    finally:
+        await store.close()

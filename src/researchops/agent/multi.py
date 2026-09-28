@@ -283,8 +283,9 @@ def build_multi_agent(
         saved = False
         if memory is not None and state.final_report:
             await memory.remember(
-                f"Task: {state.task}\nResult: {state.final_report}"[:4000],
+                state.final_report[:4000],
                 kind="note",
+                task=state.task[:500],
             )
             saved = True
         return {"memorized": saved}

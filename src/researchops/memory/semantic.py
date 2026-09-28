@@ -50,8 +50,8 @@ class SemanticMemoryStore:
         self._db = SqliteMemoryStore(path)
         self._vectors: dict[int, list[float]] = {}
 
-    async def remember(self, text: str, *, kind: str = "note") -> int:
-        entry_id = await self._db.remember(text, kind=kind)
+    async def remember(self, text: str, *, kind: str = "note", task: str = "") -> int:
+        entry_id = await self._db.remember(text, kind=kind, task=task)
         (dense, _idx, _vals) = (await self._embedder.embed([text]))[0]
         self._vectors[entry_id] = dense
         return entry_id

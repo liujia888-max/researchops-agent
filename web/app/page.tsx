@@ -40,6 +40,14 @@ type Doc = {
   chunks: number;
 };
 
+type MemoryItem = {
+  id: number;
+  task: string;
+  result: string;
+  kind: string;
+  created_at: string;
+};
+
 type PendingApproval = {
   request_id: string;
   tool_name: string;
@@ -159,6 +167,7 @@ export default function Home() {
   const [langfuseUrl, setLangfuseUrl] = useState("");
   const [error, setError] = useState("");
   const [experiments, setExperiments] = useState<Experiment[]>([]);
+  const [memories, setMemories] = useState<MemoryItem[]>([]);
   const [documents, setDocuments] = useState<Doc[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
@@ -193,9 +202,19 @@ export default function Home() {
     }
   }
 
+  async function refreshMemories() {
+    try {
+      const res = await fetch(`${API_BASE}/memory`);
+      if (res.ok) setMemories(await res.json());
+    } catch {
+      // backend not reachable — keep last list
+    }
+  }
+
   useEffect(() => {
     refreshExperiments();
     refreshDocuments();
+    refreshMemories();
   }, []);
 
   useEffect(() => {
@@ -305,6 +324,7 @@ export default function Home() {
     } finally {
       setRunning(false);
       refreshExperiments();
+      refreshMemories();
     }
   }
 
@@ -419,6 +439,44 @@ export default function Home() {
                       </button>
                     </span>
                   </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="card memories">
+            <div className="head" style={{ fontWeight: 600, marginBottom: 10 }}>
+              历史问答（记忆）
+            </div>
+            {memories.length === 0 ? (
+              <p className="muted" style={{ marginTop: 10 }}>
+                暂无历史任务——每跑完一次任务，问题与报告会自动记在这里
+              </p>
+            ) : (
+              <div style={{ marginTop: 10 }}>
+                {memories.map((m) => (
+                  <button
+                    key={m.id}
+                    className="memory-item"
+                    title={`${m.created_at.slice(0, 10)} · 点击载入到输入框`}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "6px 4px",
+                      border: "none",
+                      borderBottom: "1px solid var(--border)",
+                      background: "none",
+                      cursor: "pointer",
+                      fontSize: 13,
+                    }}
+                    onClick={() => setTask(m.task)}
+                  >
+                    {m.task.length > 42 ? `${m.task.slice(0, 42)}…` : m.task}
+                    <span className="muted" style={{ float: "right", fontSize: 11, marginLeft: 8 }}>
+                      {m.kind === "experiment" ? "实验" : m.created_at.slice(0, 10)}
+                    </span>
+                  </button>
                 ))}
               </div>
             )}

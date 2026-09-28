@@ -19,11 +19,22 @@ import aiosqlite
 from researchops.config import get_settings
 
 _TOKEN = re.compile(r"[a-z0-9]+")
+_CJK = re.compile(r"[一-鿿]+")
 
 
 def _tokens(text: str) -> set[str]:
-    """Lowercased alphanumeric tokens (letters/digits), the lexical recall vocabulary."""
-    return set(_TOKEN.findall(text.lower()))
+    """Lowercased latin tokens plus CJK character bigrams.
+
+    Latin words are matched whole; Chinese has no whitespace word boundaries in the
+    raw text, so each CJK run is shingled into overlapping 2-char bigrams. A query
+    like 「图像去噪」 then matches stored entries sharing the same character pairs,
+    without pulling in a tokenizer dependency.
+    """
+    lowered = text.lower()
+    tokens = set(_TOKEN.findall(lowered))
+    for run in _CJK.findall(lowered):
+        tokens.update(run[i : i + 2] for i in range(len(run) - 1))
+    return tokens
 
 
 @dataclass(frozen=True)
@@ -34,12 +45,13 @@ class MemoryEntry:
     text: str
     kind: str  # "experiment" | "note" | ...
     created_at: str
+    task: str = ""  # the original user task, when the entry came from an agent run
 
 
 class MemoryStore(Protocol):
     """The memory interface both backends implement (lexical now, semantic later)."""
 
-    async def remember(self, text: str, *, kind: str = "note") -> int: ...
+    async def remember(self, text: str, *, kind: str = "note", task: str = "") -> int: ...
 
     async def recall(self, query: str, *, k: int = 5) -> list[MemoryEntry]: ...
 
@@ -68,31 +80,44 @@ class SqliteMemoryStore:
                 "kind TEXT NOT NULL DEFAULT 'note', "
                 "created_at TEXT NOT NULL)"
             )
+            # v2 schema: the original task gets its own column so a history UI can
+            # list "questions asked" without parsing the free text. v1 databases
+            # (task stored inside text as "Task: ...\nResult: ...") are migrated in place.
+            cursor = await self._conn.execute("PRAGMA table_info(memories)")
+            columns = {row[1] for row in await cursor.fetchall()}
+            if "task" not in columns:
+                await self._conn.execute(
+                    "ALTER TABLE memories ADD COLUMN task TEXT NOT NULL DEFAULT ''"
+                )
             await self._conn.commit()
         return self._conn
 
-    async def remember(self, text: str, *, kind: str = "note") -> int:
+    async def remember(self, text: str, *, kind: str = "note", task: str = "") -> int:
         db = await self._db()
         now = datetime.now(UTC).isoformat()
         cursor = await db.execute(
-            "INSERT INTO memories (text, kind, created_at) VALUES (?, ?, ?)",
-            (text, kind, now),
+            "INSERT INTO memories (text, kind, task, created_at) VALUES (?, ?, ?, ?)",
+            (text, kind, task, now),
         )
         await db.commit()
         return int(cursor.lastrowid or 0)
 
     async def recall(self, query: str, *, k: int = 5) -> list[MemoryEntry]:
         db = await self._db()
-        cursor = await db.execute("SELECT id, text, kind, created_at FROM memories")
+        cursor = await db.execute("SELECT id, text, kind, task, created_at FROM memories")
         rows = await cursor.fetchall()
 
         query_tokens = _tokens(query)
         scored: list[tuple[float, MemoryEntry]] = []
         for row in rows:
             entry = MemoryEntry(
-                id=int(row[0]), text=str(row[1]), kind=str(row[2]), created_at=str(row[3])
+                id=int(row[0]),
+                text=str(row[1]),
+                kind=str(row[2]),
+                task=str(row[3]),
+                created_at=str(row[4]),
             )
-            entry_tokens = _tokens(entry.text)
+            entry_tokens = _tokens(f"{entry.task} {entry.text}")
             if not entry_tokens or not query_tokens:
                 continue
             overlap = len(query_tokens & entry_tokens)
@@ -108,15 +133,19 @@ class SqliteMemoryStore:
     async def list_entries(self) -> list[MemoryEntry]:
         """Return every stored entry (in insertion order).
 
-        Used by the semantic backend to re-score entries with embeddings; kept public
-        so a future UI can browse the memory log without going through ``recall``.
+        Used by the semantic backend to re-score entries with embeddings and by the
+        web UI to browse the memory log (past tasks and their reports).
         """
         db = await self._db()
-        cursor = await db.execute("SELECT id, text, kind, created_at FROM memories")
+        cursor = await db.execute("SELECT id, text, kind, task, created_at FROM memories")
         rows = await cursor.fetchall()
         return [
             MemoryEntry(
-                id=int(r[0]), text=str(r[1]), kind=str(r[2]), created_at=str(r[3])
+                id=int(r[0]),
+                text=str(r[1]),
+                kind=str(r[2]),
+                task=str(r[3]),
+                created_at=str(r[4]),
             )
             for r in rows
         ]
