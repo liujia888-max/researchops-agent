@@ -29,6 +29,24 @@ jobs:
       - name: Tests (pytest)
         run: pytest
 
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build frontend (next build runs its own TypeScript check)
+        run: npm run build
+
   docker:
     runs-on: ubuntu-latest
     steps:
@@ -39,3 +57,6 @@ jobs:
 
       - name: Build API image
         run: docker compose build api
+
+      - name: Build web image
+        run: docker compose build web

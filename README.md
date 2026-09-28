@@ -1,5 +1,9 @@
 # ResearchOps Agent
 
+[![CI](https://github.com/liujia888-max/researchops-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/liujia888-max/researchops-agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
+
 面向深度学习实验的科研智能体（AI 应用工程师 / Agent 工程师方向的项目）。
 
 给它一篇论文 PDF 和一句「复现 Restormer 在 CBSD68 σ=25 上的结果，并和 model_v3_rgb 对比，出报告」，Agent 自主完成：任务拆解 → 检索论文库(RAG) → 读代码/历史实验 → 经 MCP 提交任务到远程 GPU → 轮询日志/解析指标 → 落库并生成带引用的对比报告。
@@ -99,7 +103,11 @@ npm run dev        # 开发模式
 NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000 npm run dev
 ```
 
-界面支持：SSE 流式查看 Agent 每一步（计划 → 工具调用 → 工具结果 → 最终报告）、勾选 Langfuse 追踪、展示本次 Trace 的 token/成本、以及历史实验列表。
+### Windows 无 Docker：一键启动（原生 Qdrant + uvicorn + Next.js）
+
+装好 Python 3.12（`pip install -e ".[dev]"`）、Node.js 20+ 与 Qdrant（`qdrant.exe` 在 PATH 上）后，双击 [`scripts/start_all.bat`](scripts/start_all.bat)（或 `powershell -ExecutionPolicy Bypass -File scripts\start_all.ps1`）：脚本自动释放 3000/8000/6333 端口、拉起 Qdrant / 后端 / 前端三个窗口、清 Next.js 缓存，15 秒后自动打开浏览器。找不到 Qdrant 时脚本会提示并跳过（RAG 检索不可用，其余功能正常）。
+
+界面支持：ChatGPT / DeepSeek 式对话气泡——SSE 把计划、每次工具调用与最终报告实时流进同一轮对话（执行过程自动折叠）；「历史问答（记忆）」侧栏保存每一次问答，点击即可在对话区完整还原并可接着追问；每轮回答底部展示 Trace 的 token/成本，可勾选 Langfuse 追踪；侧栏另含文档库（上传/删除/入库）与历史实验列表。
 
 ## 架构
 
